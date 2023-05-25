@@ -3,7 +3,6 @@ project(ImplicitNonlinearComplementarity)
 
 set(CMAKE_CXX_STANDARD 17)
 
-
 #CHAI-3D
 FIND_PACKAGE(CHAI3D REQUIRED CONFIG)
 ADD_DEFINITIONS(${CHAI3D_DEFINITIONS})
@@ -24,10 +23,23 @@ if (EXISTS ${PROJECT_SOURCE_DIR}/extras/GLFW)
     add_subdirectory (${PROJECT_SOURCE_DIR}/extras/GLFW)
 endif ()
 
-add_executable(ImplicitNonlinearComplementarity main.cpp)
+find_package(drake CONFIG REQUIRED PATHS /opt/drake)
+
+get_filename_component(DRAKE_PYTHONPATH "${drake_DIR}" DIRECTORY)
+get_filename_component(DRAKE_PYTHONPATH "${DRAKE_PYTHONPATH}" DIRECTORY)
+set(DRAKE_PYTHONPATH
+        "${DRAKE_PYTHONPATH}/python${PYTHON_VERSION_MAJOR_MINOR}/site-packages"
+        )
+
+add_subdirectory(external/collisiondetection)
+include_directories(external/collisiondetection/include)
+
+add_executable(ImplicitNonlinearComplementarity main2.cpp implicit_lcp.cpp implicit_lcp.hpp lcp.cpp lcp.hpp collision.cpp collision.hpp aabb.cpp aabb.hpp objects.hpp helper.hpp)
 
 target_link_libraries(ImplicitNonlinearComplementarity PUBLIC
+        collisiondetection
         ${CHAI3D_LIBRARIES}
         ${GLFW_LIBRARIES}
-        Eigen3::Eigen)
+        Eigen3::Eigen
+        drake::drake)
 
