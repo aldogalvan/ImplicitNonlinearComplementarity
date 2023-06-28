@@ -1,6 +1,10 @@
 #include <iostream>
 #include "chai3d.h"
 #include <Eigen/Dense>
+#include "src/objects.hpp"
+#include "src/collision.hpp"
+#include "src/helper.hpp"
+#include "src/implicit_lcp.hpp"
 //------------------------------------------------------------------------------
 #include "extras/GLFW/include/GLFW/glfw3.h"
 //------------------------------------------------------------------------------
@@ -21,20 +25,6 @@ using namespace Eigen;
     C_STEREO_PASSIVE_TOP_BOTTOM:  Passive stereo where L/R images are rendered above each other
 */
 cStereoMode stereoMode = C_STEREO_DISABLED;
-
-struct collisionInfo
-{
-    Vector3d collisionPt;
-    Vector3d collisionNormal;
-    double collisionDepth;
-};
-
-struct LCP
-{
-    MatrixXd A;
-    MatrixXd b;
-    MatrixXd x;
-};
 
 enum MouseStates
 {
@@ -60,13 +50,17 @@ bool mirroredDisplay = false;
 // DECLARED VARIABLES
 //------------------------------------------------------------------------------
 
-// the sphere
-cShapeSphere* god_object_sphere;
-cVector3d god_object;
-cVector3d haptic_device;
+// the device position
+cVector3d device_pos;
 
-// the triangle
-cShapeLine* triangle[3];
+// the god object position
+cVector3d god_object_pos;
+
+// the sphere
+cMultiMesh* object1;
+
+// the plane
+cMultiMesh* object2;
 
 // a world that contains all objects of the virtual environment
 cWorld* world;
@@ -75,7 +69,7 @@ cWorld* world;
 cCamera* camera;
 
 // a light source to illuminate the objects in the world
-cDirectionalLight *light;
+cSpotLight *light;
 
 // a haptic device handler
 cHapticDeviceHandler* handler;
@@ -92,17 +86,11 @@ cLabel* labelHapticDevicePosition;
 // a global variable to store the position [m] of the haptic device
 cVector3d hapticDevicePosition;
 
-// a global variable to store the velocity [m/s] of the haptic device
-cVector3d hapticDeviceVelocity;
-
 // a font for rendering text
 cFontPtr font;
 
 // a label to display the rate [Hz] at which the simulation is running
 cLabel* labelRates;
-
-// a line representing the velocity of the haptic device
-cShapeLine* velocity;
 
 
 // a flag to indicate if the haptic simulation currently running
@@ -117,6 +105,9 @@ cFrequencyCounter freqCounterGraphics;
 // a frequency counter to measure the simulation haptic rate
 cFrequencyCounter freqCounterHaptics;
 
+// a frequency counter to measure the simulation haptic rate
+cFrequencyCounter freqCounterSimulation;
+
 // mouse state
 MouseStates mouseState = MOUSE_IDLE;
 
@@ -125,6 +116,9 @@ double mouseX, mouseY;
 
 // haptic thread
 cThread* hapticsThread;
+
+// simulation thread
+cThread* simulationThread;
 
 // a handle to window display context
 GLFWwindow* window = NULL;
@@ -168,16 +162,12 @@ void updateGraphics(void);
 // this function contains the main haptics simulation loop
 void updateHaptics(void);
 
+void updateSimulation(void);
+
 // this function closes the application
 void close(void);
 
-bool sphereTriangleCollision(double sphereRadius, const cVector3d& spherePosition,
-                             const cVector3d& triangleVertex1, const cVector3d& triangleVertex2,
-                             const cVector3d& triangleVertex3, collisionInfo& colInfo);
-bool isPointInsideTriangle(const cVector3d& point, const cVector3d& triangleVertex1,
-                           const cVector3d& triangleVertex2, const cVector3d& triangleVertex3);
-VectorXd lemkes_algorithm(const MatrixXd& M, const VectorXd& q);
-Matrix<double, 3, 8> computeFrictionConeJacobian(const Vector3d& contactNormal);
+void fillEigenMatrices( cMultiMesh* mesh, MatrixXd& vertices, MatrixXi& triangles);
 
 int main(int argc, char* argv[])
 {
@@ -292,7 +282,7 @@ int main(int argc, char* argv[])
     world = new cWorld();
 
     // set the background color of the environment
-    world->m_backgroundColor.setBlack();
+    world->m_backgroundColor.setWhite();
 
     // create a camera and insert it into the virtual world
     camera = new cCamera(world);
@@ -317,7 +307,7 @@ int main(int argc, char* argv[])
     camera->setMirrorVertical(mirroredDisplay);
 
     // create a directional light source
-    light = new cDirectionalLight(world);
+    light = new cSpotLight(world);
 
     // insert light source inside world
     world->addChild(light);
@@ -326,16 +316,25 @@ int main(int argc, char* argv[])
     light->setEnabled(true);
 
     // define direction of light beam
-    light->setDir(-1.0, 0.0, 0.0);
+    light->setLocalPos(cVector3d(1,0,0));
+    light->setDir(-1, 0, 0.0);
 
-    // draw a triangle
-    triangle[0] = new cShapeLine(cVector3d(0,0,0),cVector3d(0,0,0.2));
-    triangle[1] = new cShapeLine(cVector3d(0,0,0.2),cVector3d(0,0.2,0.2));
-    triangle[2] = new cShapeLine(cVector3d(0,0.2,0.2),cVector3d(0,0,0.0));
+    object1  = new cMultiMesh();
+    object1->loadFromFile("/home/aldo/ImplicitNonlinearComplementarity/resources/model.obj");
+    object1->getMesh(0)->m_material->setRed();
+    object1->m_material->setShininess(0.75);
+    object1->setLocalPos(cVector3d(0.2,0,0.7));
+    world->addChild(object1);
 
-    world->addChild(triangle[0]);
-    world->addChild(triangle[1]);
-    world->addChild(triangle[2]);
+    object2 = new cMultiMesh();
+    object2->loadFromFile("/home/aldo/ImplicitNonlinearComplementarity/resources/model.obj");
+    object2->setLocalPos(cVector3d(0.0,0.0,0.0));
+    object2->m_material->setShininess(0.75);
+    object2->getMesh(0)->m_material->setBlueCyan();
+
+    world->addChild(object2);
+
+    world->computeGlobalPositions();
 
     //--------------------------------------------------------------------------
     // HAPTIC DEVICE
@@ -352,9 +351,6 @@ int main(int argc, char* argv[])
 
     // retrieve information about the current haptic device
     cHapticDeviceInfo info = hapticDevice->getSpecifications();
-
-    //
-
 
     //--------------------------------------------------------------------------
     // WIDGETS
@@ -375,6 +371,7 @@ int main(int argc, char* argv[])
     // create a label to display the haptic and graphic rate of the simulation
     labelRates = new cLabel(font);
     camera->m_frontLayer->addChild(labelRates);
+    labelRates->m_fontColor.setBlack();
 
     //--------------------------------------------------------------------------
     // START SIMULATION
@@ -383,6 +380,10 @@ int main(int argc, char* argv[])
     // create a thread which starts the main haptics rendering loop
     hapticsThread = new cThread();
     hapticsThread->start(updateHaptics, CTHREAD_PRIORITY_HAPTICS);
+
+    // create a thread which starts the main simulation loop
+    simulationThread = new cThread();
+    simulationThread->start(updateSimulation, CTHREAD_PRIORITY_SIMULATION);
 
     // setup callback when application exits
     atexit(close);
@@ -587,6 +588,7 @@ void close(void)
 
 void updateGraphics(void)
 {
+
     /////////////////////////////////////////////////////////////////////
     // UPDATE WIDGETS
     /////////////////////////////////////////////////////////////////////
@@ -596,6 +598,7 @@ void updateGraphics(void)
 
     // update haptic and graphic rate data
     labelRates->setText(cStr(freqCounterGraphics.getFrequency(), 0) + " Hz / " +
+                                cStr(freqCounterSimulation.getFrequency(), 0) + " Hz / " +
                         cStr(freqCounterHaptics.getFrequency(), 0) + " Hz");
 
     // update position of label
@@ -623,100 +626,106 @@ void updateGraphics(void)
 
 //------------------------------------------------------------------------------
 
-void updateHaptics(void)
+void updateSimulation(void)
 {
     // simulation in now running
-    simulationRunning  = true;
+    simulationRunning = true;
     simulationFinished = false;
-
-    // 6 DOF God Object
-    god_object_sphere = new cShapeSphere(0.01);
-    world->addChild(god_object_sphere);
-
-    cVector3d haptic_device;
-    hapticDevice->getPosition(haptic_device);
-    cVector3d god_object = haptic_device;
-
-    Vector3d qdot; qdot.setZero();
-
-    double frictionCoeff = 0.5;
 
     cPrecisionClock clock;
 
+    MatrixXd object1_vertices;
+    MatrixXi object1_triangles;
+    fillEigenMatrices(object1, object1_vertices, object1_triangles);
+
+    MatrixXd object2_vertices;
+    MatrixXi object2_triangles;
+    fillEigenMatrices(object2, object2_vertices, object2_triangles);
+
+    VectorXd object1_position_unconstrained = object1->getLocalPos().eigen();
+    VectorXd object1_position_constrained = object1->getLocalPos().eigen();
+    VectorXd object1_velocity_unconstrained(3);
+    VectorXd object1_velocity_constrained(3);
+
+    // mass matrix
+    MatrixXd M(3,3); M.setIdentity();
+
+
     // main haptic simulation loop
-    while(simulationRunning)
-    {
+    while (simulationRunning) {
+
         clock.stop();
         double dt = clock.getCurrentTimeSeconds();
         clock.start(true);
 
-        hapticDevice->getPosition(haptic_device);
 
-        cVector3d vertex1(0,0,0); cVector3d vertex2(0,0,0.1); cVector3d vertex3(0,0.1,0.1);
-
-        collisionInfo colInfo;
-
-        // LCP formulation
-        if (sphereTriangleCollision(0.01,haptic_device,
-                                vertex1,vertex2,vertex3,colInfo))
+        // compute collisions
+        vector<Contact*> collisions;
+        if (CollisionDetector::findCollisions(object1_position_constrained, object1_position_unconstrained ,object1_vertices, object1_triangles,
+                                              Vector3d(0,0,0),Vector3d(0,0,0), object2_vertices, object2_triangles, // is static
+                                              collisions))
         {
-            LCP lcp;
-
-            int numCollisions = 1;
-            int numObjects = 1;
-            int numDOF = 3*numObjects;
-
-            // mass matrix
-            MatrixXd M(3,3); M.setIdentity();
-
-            // friction cone basis matrix
-            MatrixXd D(8,8); D.setIdentity();
-
-            // N matrix
-            MatrixXd N(numDOF,numCollisions);
-            MatrixXd J_n(3,3); J_n.setIdentity();
-            J_n(0,0) = colInfo.collisionNormal(0);
-            J_n(1,0) = colInfo.collisionNormal(1);
-            J_n(2,0) = colInfo.collisionNormal(2);
-
-            N.block<3,1>(0,0) = J_n.transpose()*colInfo.collisionNormal;
-
-            // B matrix
-            MatrixXd B(numDOF,numCollisions*8);
-            auto Jb = computeFrictionConeJacobian(colInfo.collisionNormal);
-            B.block<3,8>(0,0) = Jb*D;
-
-            // E matrix
-            MatrixXd E(8,1); E.setOnes();
-
-            // A Matrix
-            MatrixXd A(10,10);
-            A.block<1,1>(0,0) = dt *N.transpose()*M.inverse()*N;
-            A.block<1,8>(0,1) = dt * N.transpose() * M.inverse() * B;
-            A(0,2) = 0 ;
-
-            A.block<8,1>(1,0) = dt * B.transpose() * M.inverse() * N;
-            A.block<8,8>(1,1) = dt * B.transpose() * M.inverse() * B;
-            A.block<8,1>(1,2) = E;
-
-            A(9,0) = frictionCoeff;
-            A.block<1,8>(9,1) = E.transpose();
-            A(9,9) = 0;
-
-            // q vector
-            VectorXd q(10);
-            q.head(1) = N.transpose()*M.inverse()*M*qdot;
-            auto test = B.transpose()*M.inverse()*M*qdot;
-            q.head<8>(1) = VectorXd(8);//B.transpose()*M.inverse()*M*qdot;
-            q(9) = 0;
+            object1_position_constrained = object1_position_unconstrained;
+            ImplicitLCP::setup_implicit_lcp_haptic_quasistatic(object1_position_constrained, object1_position_unconstrained,
+                                            object1_position_unconstrained, collisions, dt);
         }
         else
         {
-            god_object = haptic_device;
+            object1_velocity_constrained = object1_velocity_unconstrained;
+            object1_position_constrained = object1_position_unconstrained;
         }
 
-        god_object_sphere->setLocalPos(god_object);
-        hapticDevice->setForce(cVector3d(0,0,0));
+        // the the global variable for the god object position
+        god_object_pos = cVector3d(object1_position_constrained);
+
+        // update the device velocity
+        object1_position_unconstrained = device_pos.eigen();
+        object1_velocity_unconstrained = (object1_position_unconstrained-object1_position_constrained)/dt;
+
+
+        for (auto ptr : collisions)
+        {
+            delete [] ptr;
+        }
+
+        object1->setLocalPos(object1_position_constrained);
+
+        // update frequency counter
+        freqCounterSimulation.signal(1);
+    }
+
+    // exit haptics thread
+    simulationFinished = true;
+}
+void updateHaptics(void) {
+
+    // simulation in now running
+    simulationRunning = true;
+    simulationFinished = false;
+
+    cPrecisionClock clock;
+
+    int scale_factor = 5; // the scaling
+    cVector3d start_pos = cVector3d(0,0,0.5); // the starting position
+
+    double k = 2000;// the stiffness
+    double b = 0.5; //  the damping
+
+    // main haptic simulation loop
+    while (simulationRunning) {
+
+        clock.stop();
+        double dt = clock.getCurrentTimeSeconds();
+        clock.start(true);
+
+        hapticDevice->getPosition(device_pos);
+        device_pos *= scale_factor;
+        device_pos += start_pos;
+
+        Vector3d force(0,0,0);
+
+//        force = (device_pos.eigen() - god_object_pos.eigen())*k;
+        hapticDevice->setForce(force);
 
         // update frequency counter
         freqCounterHaptics.signal(1);
@@ -726,138 +735,29 @@ void updateHaptics(void)
     simulationFinished = true;
 }
 
-//------------------------------------------------------------------------------
+void fillEigenMatrices( cMultiMesh* mesh, MatrixXd& vertices, MatrixXi& triangles) {
 
-bool sphereTriangleCollision(double sphereRadius, const cVector3d& spherePosition,
-                             const cVector3d& triangleVertex1, const cVector3d& triangleVertex2,
-                             const cVector3d& triangleVertex3, collisionInfo& contactInfo)
-{
-    // Compute the normal of the triangle
-    cVector3d triangleNormal = cNormalize(cCross(triangleVertex2 - triangleVertex1,
-                                                 triangleVertex3 - triangleVertex1));
+    // Get the number of vertices and triangles in the mesh
+    int numVertices = mesh->getNumVertices();
+    int numTriangles = mesh->getNumTriangles();
 
-    // Compute the signed distance from the sphere center to the plane of the triangle
-    double signedDistance = cDot(triangleNormal, spherePosition - triangleVertex1);
+    // Resize the Eigen matrices to accommodate the vertices and triangles
+    vertices.resize(numVertices, 3);
+    triangles.resize(numTriangles, 3);
 
-    // Check if the sphere is above or below the triangle plane
-    if (signedDistance > sphereRadius || signedDistance < -sphereRadius)
-    {
-        // No collision
-        return false;
+    // Fill the vertices matrix
+    for (int i = 0; i < numVertices; ++i) {
+
+        const cVector3d& vertex = mesh->getVertexPos(i).eigen();
+        vertices.row(i) << vertex.x(), vertex.y(), vertex.z();
     }
 
-    // Compute the projection of the sphere center onto the triangle plane
-    cVector3d projection = spherePosition - signedDistance * triangleNormal;
-
-    // Check if the projection is inside the triangle
-    if (!isPointInsideTriangle(projection, triangleVertex1, triangleVertex2, triangleVertex3))
-    {
-        // No collision
-        return false;
+    // Fill the triangles matrix
+    for (int i = 0; i < numTriangles; ++i) {
+        cVector3d triangle (mesh->getMesh(0)->m_triangles->getVertexIndex0(i),
+                            mesh->getMesh(0)->m_triangles->getVertexIndex1(i),
+                            mesh->getMesh(0)->m_triangles->getVertexIndex2(i));
+        triangles.row(i) << triangle.x(), triangle.y(), triangle.z();
     }
 
-    // Compute the contact point and penetration depth
-    contactInfo.collisionPt = projection.eigen();
-    contactInfo.collisionDepth = sphereRadius - signedDistance;
-    contactInfo.collisionNormal = (projection - spherePosition).eigen();
-    contactInfo.collisionNormal.normalize();
-
-    // Collision detected
-    return true;
-}
-
-bool isPointInsideTriangle(const cVector3d& point, const cVector3d& triangleVertex1,
-                           const cVector3d& triangleVertex2, const cVector3d& triangleVertex3)
-{
-    // Compute the barycentric coordinates of the point with respect to the triangle
-    cVector3d edge0 = triangleVertex2 - triangleVertex1;
-    cVector3d edge1 = triangleVertex3 - triangleVertex1;
-    cVector3d edge2 = point - triangleVertex1;
-    double dot00 = cDot(edge0, edge0);
-    double dot01 = cDot(edge0, edge1);
-    double dot02 = cDot(edge0, edge2);
-    double dot11 = cDot(edge1, edge1);
-    double dot12 = cDot(edge1, edge2);
-    double invDenom = 1.0 / (dot00 * dot11 - dot01 * dot01);
-    double u = (dot11 * dot02 - dot01 * dot12) * invDenom;
-    double v = (dot00 * dot12 - dot01 * dot02) * invDenom;
-
-    // Check if the point is inside the triangle
-    return (u >= 0.0) && (v >= 0.0) && (u + v <= 1.0);
-}
-
-VectorXd lemkes_algorithm(const MatrixXd& M, const VectorXd& q) {
-    int n = q.size();
-    VectorXd z = VectorXd::Zero(n);
-    VectorXd w = VectorXd::Zero(n);
-    VectorXi basis = VectorXi::LinSpaced(n, n, 2 * n - 1);
-
-    int i = 0;
-
-    while (true) {
-        std::cout << i << std::endl;
-        int entering_index;
-        w.maxCoeff(&entering_index);
-        int entering_var = basis(entering_index);
-
-        if (w(entering_index) <= 0)
-            break;
-
-        VectorXd d = M.colPivHouseholderQr().solve(-M.col(entering_var));
-        int leaving_index = -1;
-        double min_ratio = std::numeric_limits<double>::max();
-        for (int j = 0; j < n; j++) {
-            if (d(j) > 0 && z(j) / d(j) < min_ratio) {
-                leaving_index = j;
-                min_ratio = z(j) / d(j);
-            }
-        }
-        int leaving_var = basis(leaving_index);
-
-        double theta = std::min(z(leaving_index) / d(leaving_index), 1.0);
-        z += theta * d;
-        z(leaving_index) = 0;
-
-        double phi = std::min(w(entering_index) / M(leaving_index, entering_var), 1.0);
-        w += phi * M.col(entering_var);
-        w(entering_index) = 0;
-
-        basis(entering_index) = leaving_var;
-        basis(leaving_index) = entering_var;
-        i++;
-    }
-
-    return z.head(n);
-}
-
-
-Matrix<double, 3, 8> computeFrictionConeJacobian(const Vector3d& contactNormal)
-{
-    // Compute two orthogonal vectors in the tangential plane
-    Vector3d tangent1, tangent2;
-    if (std::abs(contactNormal.x()) < std::abs(contactNormal.y()))
-    {
-        tangent1 << 0, -contactNormal.z(), contactNormal.y();
-    }
-    else
-    {
-        tangent1 << -contactNormal.z(), 0, contactNormal.x();
-    }
-    tangent1.normalize();
-    tangent2 = contactNormal.cross(tangent1);
-
-    // Compute the angles for the friction cone vertices
-    const int numVertices = 8;
-    const double coneAngle = M_PI / 4.0;
-    VectorXd angles = VectorXd::LinSpaced(numVertices, 0, 2 * M_PI - coneAngle).array() + coneAngle / 2.0;
-    // Construct the Jacobian matrix for the friction cone
-    Matrix<double, 3, 8> J_friction;
-    for (int i = 0; i < numVertices; ++i)
-    {
-        double angle = angles(i);
-        Vector3d vertexDirection = std::cos(angle) * tangent1 + std::sin(angle) * tangent2;
-        J_friction.col(i) = vertexDirection;
-    }
-
-    return J_friction;
 }

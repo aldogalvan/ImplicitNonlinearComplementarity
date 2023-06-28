@@ -1,10 +1,10 @@
 #include <iostream>
 #include "chai3d.h"
 #include <Eigen/Dense>
-#include "objects.hpp"
-#include "collision.hpp"
-#include "helper.hpp"
-#include "lcp.hpp"
+#include "src/objects.hpp"
+#include "src/collision.hpp"
+#include "src/helper.hpp"
+#include "src/implicit_lcp.hpp"
 //------------------------------------------------------------------------------
 #include "extras/GLFW/include/GLFW/glfw3.h"
 //------------------------------------------------------------------------------
@@ -50,9 +50,20 @@ bool mirroredDisplay = false;
 // DECLARED VARIABLES
 //------------------------------------------------------------------------------
 
+// the device position
+cVector3d device_pos;
+
+// the god object position
+cVector3d god_object_pos;
+
+// the haptic device velocity
+cVector3d device_velocity;
+
 // the sphere
-RigidObject* object;
-RigidObject* godObject;
+cMultiMesh* object1;
+
+// the plane
+cMultiMesh* object2;
 
 // a world that contains all objects of the virtual environment
 cWorld* world;
@@ -61,7 +72,7 @@ cWorld* world;
 cCamera* camera;
 
 // a light source to illuminate the objects in the world
-cDirectionalLight *light;
+cSpotLight *light;
 
 // a haptic device handler
 cHapticDeviceHandler* handler;
@@ -78,17 +89,11 @@ cLabel* labelHapticDevicePosition;
 // a global variable to store the position [m] of the haptic device
 cVector3d hapticDevicePosition;
 
-// a global variable to store the velocity [m/s] of the haptic device
-cVector3d hapticDeviceVelocity;
-
 // a font for rendering text
 cFontPtr font;
 
 // a label to display the rate [Hz] at which the simulation is running
 cLabel* labelRates;
-
-// a line representing the velocity of the haptic device
-cShapeLine* velocity;
 
 
 // a flag to indicate if the haptic simulation currently running
@@ -103,6 +108,9 @@ cFrequencyCounter freqCounterGraphics;
 // a frequency counter to measure the simulation haptic rate
 cFrequencyCounter freqCounterHaptics;
 
+// a frequency counter to measure the simulation haptic rate
+cFrequencyCounter freqCounterSimulation;
+
 // mouse state
 MouseStates mouseState = MOUSE_IDLE;
 
@@ -111,6 +119,9 @@ double mouseX, mouseY;
 
 // haptic thread
 cThread* hapticsThread;
+
+// simulation thread
+cThread* simulationThread;
 
 // a handle to window display context
 GLFWwindow* window = NULL;
@@ -154,10 +165,12 @@ void updateGraphics(void);
 // this function contains the main haptics simulation loop
 void updateHaptics(void);
 
+void updateSimulation(void);
+
 // this function closes the application
 void close(void);
 
-void importMeshes(void);
+void fillEigenMatrices( cMultiMesh* mesh, MatrixXd& vertices, MatrixXi& triangles);
 
 int main(int argc, char* argv[])
 {
@@ -272,7 +285,7 @@ int main(int argc, char* argv[])
     world = new cWorld();
 
     // set the background color of the environment
-    world->m_backgroundColor.setBlack();
+    world->m_backgroundColor.setWhite();
 
     // create a camera and insert it into the virtual world
     camera = new cCamera(world);
@@ -297,7 +310,7 @@ int main(int argc, char* argv[])
     camera->setMirrorVertical(mirroredDisplay);
 
     // create a directional light source
-    light = new cDirectionalLight(world);
+    light = new cSpotLight(world);
 
     // insert light source inside world
     world->addChild(light);
@@ -306,10 +319,25 @@ int main(int argc, char* argv[])
     light->setEnabled(true);
 
     // define direction of light beam
-    light->setDir(-1.0, 0.0, 0.0);
+    light->setLocalPos(cVector3d(1,0,0));
+    light->setDir(-1, 0, 0.0);
 
-    // import the meshes
-    importMeshes();
+    object1  = new cMultiMesh();
+    object1->loadFromFile("/home/aldo/ImplicitNonlinearComplementarity/resources/model.obj");
+    object1->getMesh(0)->m_material->setRed();
+    object1->m_material->setShininess(0.75);
+    object1->setLocalPos(cVector3d(0.2,0,0.7));
+    world->addChild(object1);
+
+    object2 = new cMultiMesh();
+    object2->loadFromFile("/home/aldo/ImplicitNonlinearComplementarity/resources/model.obj");
+    object2->setLocalPos(cVector3d(0.0,0.0,0.0));
+    object2->m_material->setShininess(0.75);
+    object2->getMesh(0)->m_material->setBlueCyan();
+
+    world->addChild(object2);
+
+    world->computeGlobalPositions();
 
     //--------------------------------------------------------------------------
     // HAPTIC DEVICE
@@ -326,9 +354,6 @@ int main(int argc, char* argv[])
 
     // retrieve information about the current haptic device
     cHapticDeviceInfo info = hapticDevice->getSpecifications();
-
-    //
-
 
     //--------------------------------------------------------------------------
     // WIDGETS
@@ -349,6 +374,7 @@ int main(int argc, char* argv[])
     // create a label to display the haptic and graphic rate of the simulation
     labelRates = new cLabel(font);
     camera->m_frontLayer->addChild(labelRates);
+    labelRates->m_fontColor.setBlack();
 
     //--------------------------------------------------------------------------
     // START SIMULATION
@@ -357,6 +383,10 @@ int main(int argc, char* argv[])
     // create a thread which starts the main haptics rendering loop
     hapticsThread = new cThread();
     hapticsThread->start(updateHaptics, CTHREAD_PRIORITY_HAPTICS);
+
+    // create a thread which starts the main simulation loop
+    simulationThread = new cThread();
+    simulationThread->start(updateSimulation, CTHREAD_PRIORITY_SIMULATION);
 
     // setup callback when application exits
     atexit(close);
@@ -561,6 +591,7 @@ void close(void)
 
 void updateGraphics(void)
 {
+
     /////////////////////////////////////////////////////////////////////
     // UPDATE WIDGETS
     /////////////////////////////////////////////////////////////////////
@@ -570,6 +601,7 @@ void updateGraphics(void)
 
     // update haptic and graphic rate data
     labelRates->setText(cStr(freqCounterGraphics.getFrequency(), 0) + " Hz / " +
+                        cStr(freqCounterSimulation.getFrequency(), 0) + " Hz / " +
                         cStr(freqCounterHaptics.getFrequency(), 0) + " Hz");
 
     // update position of label
@@ -579,11 +611,6 @@ void updateGraphics(void)
     /////////////////////////////////////////////////////////////////////
     // RENDER SCENE
     /////////////////////////////////////////////////////////////////////
-
-    // udpate the object positions
-    godObject->updateMeshPosition();
-    object->updateMeshPosition();
-    world->computeGlobalPositions();
 
     // update shadow maps (if any)
     world->updateShadowMaps(false, mirroredDisplay);
@@ -602,84 +629,111 @@ void updateGraphics(void)
 
 //------------------------------------------------------------------------------
 
-void updateHaptics(void) {
+void updateSimulation(void)
+{
     // simulation in now running
     simulationRunning = true;
     simulationFinished = false;
 
-    double scale_factor = 100;
-    cVector3d pos;
-    hapticDevice->getPosition(pos);
-    cMatrix3d rot;
-    hapticDevice->getRotation(rot);
     cPrecisionClock clock;
 
-    // vertex positions
-    MatrixXd god_object_v = *godObject->vertices;
-    MatrixXi god_object_tris = *godObject->triangles;
-    MatrixXd object_v = *object->vertices;
-    MatrixXi object_tris = *object->triangles;
+    MatrixXd object1_vertices;
+    MatrixXi object1_triangles;
+    fillEigenMatrices(object1, object1_vertices, object1_triangles);
 
-    VectorXd tau(2*3); tau.setZero(); // number of bodies times degrees of freedom
-    MatrixXd M(6,6); M.setIdentity();
+    MatrixXd object2_vertices;
+    MatrixXi object2_triangles;
+    fillEigenMatrices(object2, object2_vertices, object2_triangles);
 
-    // create the LCP
-    vector<RigidObject*> rigid_bodies; rigid_bodies.emplace_back(godObject); rigid_bodies.emplace_back(object);
-    LCP* lcp = new LCP(rigid_bodies);
+    VectorXd object1_position_unconstrained = object1->getLocalPos().eigen();
+    VectorXd object1_position_constrained = object1->getLocalPos().eigen();
+    VectorXd object1_velocity_unconstrained(3);
+    VectorXd object1_velocity_constrained(3);
+
+    // mass matrix
+    MatrixXd M(3,3); M.setIdentity();
+
 
     // main haptic simulation loop
     while (simulationRunning) {
+
         clock.stop();
         double dt = clock.getCurrentTimeSeconds();
         clock.start(true);
 
-        hapticDevice->getPosition(pos);
-        pos *= scale_factor;
-        hapticDevice->getRotation(rot);
-
-        //
-        Vector3d t0 = godObject->q_eye.head(3);
-        Matrix3d R0 = anglesToRotationMatrix(godObject->q_eye.tail(3));
-        Vector3d t1 = pos.eigen();
-        Matrix3d R1 = rot.eigen();
-
-        // create copy of position and translate
-        MatrixXd god_object_vstart = god_object_v * R0;
-        god_object_vstart.rowwise() += t0.transpose();
-        MatrixXd god_object_vend = god_object_v * R1;
-        god_object_vend.rowwise() += t1.transpose();
-
-        // set the force vector
-        VectorXd qdot_eye(6);
-        qdot_eye << godObject->qdot_eye.head(3) , object->qdot_eye.head(3);
-        tau = M*qdot_eye;
-
         // compute collisions
-        vector<ColInfo*> collisions;
-        if (findCollisions(god_object_vstart, god_object_vend, god_object_tris,
-                           object_v, object_v, object_tris,
-                           collisions))
+        vector<Contact*> collisions;
+        if (CollisionDetector::findCollisions(object1_position_constrained, object1_position_unconstrained ,object1_vertices, object1_triangles,
+                                              Vector3d(0,0,0),Vector3d(0,0,0), object2_vertices, object2_triangles, // is static
+                                              collisions))
         {
-            // set up the lcp
-            // if successful then solve
-            VectorXd* lambda = new VectorXd;
+            object1_velocity_constrained = object1_velocity_unconstrained;
+            object1_position_constrained = object1_position_unconstrained;
+            object1_velocity_unconstrained.setZero();
 
-            if (lcp->setup_lcp(tau, collisions))
-                lcp->solve_lcp_lemke(lambda);
-
-            godObject->q_eye_minus_one = godObject->q_eye;
-            godObject->q_eye.head(3) = t1;
-            godObject->q_eye.tail(3) = rotationMatrixToAngles(R1);
+            ImplicitLCP::setup_implicit_lcp_haptic_no_friction(object1_position_constrained, object1_position_unconstrained,
+                                                   object1_velocity_constrained, object1_velocity_unconstrained, collisions, dt);
         }
         else
         {
-            // update the objects if no collision
-            godObject->q_eye_minus_one = godObject->q_eye;
-            godObject->q_eye.head(3) = t1;
-            godObject->q_eye.tail(3) = rotationMatrixToAngles(R1);
+            object1_velocity_constrained = object1_velocity_unconstrained;
+            object1_position_constrained = object1_position_unconstrained;
         }
 
-        hapticDevice->setForce(cVector3d(0, 0, 0));
+        // the the global variable for the god object position
+        god_object_pos = cVector3d(object1_position_constrained);
+
+        // update the device velocity
+        object1_position_unconstrained = device_pos.eigen();
+        object1_velocity_unconstrained = (object1_position_unconstrained - object1_position_constrained);
+
+
+        for (auto ptr : collisions)
+        {
+            delete [] ptr;
+        }
+
+        object1->setLocalPos(object1_position_constrained);
+
+        // update frequency counter
+        freqCounterSimulation.signal(1);
+    }
+
+    // exit haptics thread
+    simulationFinished = true;
+}
+void updateHaptics(void) {
+
+    // simulation in now running
+    simulationRunning = true;
+    simulationFinished = false;
+
+    cPrecisionClock clock;
+
+    int scale_factor = 5; // the scaling
+    cVector3d start_pos = cVector3d(0,0,0.5); // the starting position
+
+    double k = 2000;// the stiffness
+    double b = 0.5; //  the damping
+
+    // main haptic simulation loop
+    while (simulationRunning) {
+
+        clock.stop();
+        double dt = clock.getCurrentTimeSeconds();
+        clock.start(true);
+
+        hapticDevice->getPosition(device_pos);
+        device_pos *= scale_factor;
+        device_pos += start_pos;
+
+        hapticDevice->getLinearVelocity(device_velocity);
+        device_velocity *= scale_factor;
+
+        Vector3d force(0,0,0);
+
+//        force = (device_pos.eigen() - god_object_pos.eigen())*k;
+        hapticDevice->setForce(force);
 
         // update frequency counter
         freqCounterHaptics.signal(1);
@@ -689,62 +743,29 @@ void updateHaptics(void) {
     simulationFinished = true;
 }
 
-void importMeshes(void)
-{
-    godObject = new RigidObject();
-    godObject->vis = new cMultiMesh();
-    bool loadFile = godObject->vis->loadFromFile("/home/aldo/ImplicitNonlinearComplementarity/resources/CHAHIN_GUMMY_BEAR.obj");
-    if (!loadFile)
-    {
-        cout << "Import Failed" << endl;
-    }
-    godObject->vis->getMesh(0)->m_material->setRed();
-    godObject->vis->scale(1);
-    world->addChild(godObject->vis);
+void fillEigenMatrices( cMultiMesh* mesh, MatrixXd& vertices, MatrixXi& triangles) {
 
-    int numVerts = godObject->vis->getNumVertices();
-    int numTris = godObject->vis->getNumTriangles();
-    godObject->vertices = new MatrixXd(numVerts,3);
-    godObject->triangles = new MatrixXi(numTris,3);
-    for (int vidx = 0 ; vidx < numVerts; vidx++)
-    {
-        godObject->vertices->row(vidx) = godObject->vis->getVertexPos(vidx).eigen();
+    // Get the number of vertices and triangles in the mesh
+    int numVertices = mesh->getNumVertices();
+    int numTriangles = mesh->getNumTriangles();
+
+    // Resize the Eigen matrices to accommodate the vertices and triangles
+    vertices.resize(numVertices, 3);
+    triangles.resize(numTriangles, 3);
+
+    // Fill the vertices matrix
+    for (int i = 0; i < numVertices; ++i) {
+
+        const cVector3d& vertex = mesh->getVertexPos(i).eigen();
+        vertices.row(i) << vertex.x(), vertex.y(), vertex.z();
     }
 
-    for (int tidx = 0 ; tidx < numTris; tidx++)
-    {
-        godObject->triangles->row(tidx) = Vector3i(godObject->vis->getMesh(0)->m_triangles->getVertexIndex0(tidx),
-                                                  godObject->vis->getMesh(0)->m_triangles->getVertexIndex1(tidx),
-                                                godObject->vis->getMesh(0)->m_triangles->getVertexIndex2(tidx));
-    }
-    godObject->com = new Vector3d(godObject->vertices->colwise().mean());
-
-    object = new RigidObject;
-    object->vis = new cMultiMesh();
-    object->vis->loadFromFile("/home/aldo/ImplicitNonlinearComplementarity/resources/CHAHIN_GUMMY_BEAR.obj");
-    if (!loadFile)
-    {
-        cout << "Import Failed" << endl;
-    }
-    object->vis->getMesh(0)->m_material->setGreenLime();
-    object->vis->scale(1);
-    world->addChild(object->vis);
-
-    numVerts = object->vis->getNumVertices();
-    numTris = object->vis->getNumTriangles();
-    object->vertices = new MatrixXd(numVerts,3);
-    object->triangles = new MatrixXi(numTris,3);
-
-    for (int vidx = 0 ; vidx < numVerts; vidx++)
-    {
-        object->vertices->row(vidx) = object->vis->getVertexPos(vidx).eigen();
+    // Fill the triangles matrix
+    for (int i = 0; i < numTriangles; ++i) {
+        cVector3d triangle (mesh->getMesh(0)->m_triangles->getVertexIndex0(i),
+                            mesh->getMesh(0)->m_triangles->getVertexIndex1(i),
+                            mesh->getMesh(0)->m_triangles->getVertexIndex2(i));
+        triangles.row(i) << triangle.x(), triangle.y(), triangle.z();
     }
 
-    for (int tidx = 0 ; tidx < numTris; tidx++)
-    {
-        object->triangles->row(tidx) = Vector3i(object->vis->getMesh(0)->m_triangles->getVertexIndex0(tidx),
-                                                object->vis->getMesh(0)->m_triangles->getVertexIndex1(tidx),
-                                                object->vis->getMesh(0)->m_triangles->getVertexIndex2(tidx));
-    }
-    object->com = new Vector3d(object->vertices->colwise().mean());
 }
