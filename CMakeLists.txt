@@ -33,6 +33,8 @@ set(DRAKE_PYTHONPATH
 
 add_subdirectory(external/collisiondetection)
 include_directories(external/collisiondetection/include)
+include_directories(include/imgui)
+include_directories(include/imgui/backends)
 
 #add_executable(ImplicitNonlinearComplementarity main1.cpp implicit_lcp.cpp implicit_lcp.hpp lcp.cpp lcp.hpp collision.cpp collision.hpp aabb.cpp aabb.hpp objects.hpp helper.hpp)
 #add_executable(ImplicitNonlinearComplementarity main2.cpp implicit_lcp.cpp implicit_lcp.hpp lcp.cpp lcp.hpp collision.cpp collision.hpp aabb.cpp aabb.hpp objects.hpp helper.hpp)
@@ -55,6 +57,7 @@ target_link_libraries(ImplicitLCP PUBLIC
 add_executable(RigidBodiesDemo rigid_bodies_demo.cpp)
 add_executable(HapticsDemoQuasistatic haptics_demo_quasistatic.cpp)
 add_executable(HapticsDemo haptics_demo.cpp)
+add_executable(HapticsDemoRigid haptics_demo_rigid.cpp)
 
 add_definitions(-DTETLIBRARY)
 target_link_libraries(RigidBodiesDemo PUBLIC
@@ -62,6 +65,8 @@ target_link_libraries(RigidBodiesDemo PUBLIC
 target_link_libraries(HapticsDemoQuasistatic PUBLIC
         ImplicitLCP)
 target_link_libraries(HapticsDemo PUBLIC
+        ImplicitLCP)
+target_link_libraries(HapticsDemoRigid PUBLIC
         ImplicitLCP)
 
 

@@ -652,18 +652,24 @@ void updateSimulation(void)
     MatrixXi object1_triangles;
     fillEigenMatrices(object1, object1_vertices, object1_triangles);
 
+    VectorXd q_constrained_1(7); q_constrained_1 << 0, 0, 0, 1, 0, 0, 0;
+    q_constrained_1.block<3,1>(0,0) = device_pos.eigen();
+    VectorXd q_unconstrained_1(7); q_unconstrained_1 << 0, 0, 0, 1, 0, 0, 0;
+    q_unconstrained_1.block<3,1>(0,0) = device_pos.eigen();
+    VectorXd u_constrained_1(6); u_constrained_1.setZero();
+    VectorXd u_unconstrained_1(6); u_unconstrained_1.setZero();
+
     MatrixXd object2_vertices;
     MatrixXi object2_triangles;
     fillEigenMatrices(object2, object2_vertices, object2_triangles);
 
-    VectorXd object1_position_unconstrained = object1->getLocalPos().eigen();
-    VectorXd object1_position_constrained = object1->getLocalPos().eigen();
-    VectorXd object1_velocity_unconstrained(3);
-    VectorXd object1_velocity_constrained(3);
+    VectorXd q_constrained_2(7); q_constrained_2 << 0, 0, 0, 1, 0, 0, 0;
+    VectorXd q_unconstrained_2(7); q_unconstrained_2 << 0, 0, 0, 1, 0, 0, 0;
+    VectorXd u_constrained_2(6); u_constrained_2.setZero();
+    VectorXd u_unconstrained_2(6); u_unconstrained_2.setZero();
 
-    // mass matrix
-    MatrixXd M(3,3); M.setIdentity();
-
+    // the matrix
+    VectorXd M = VectorXd::Ones(6);
 
     // main haptic simulation loop
     while (simulationRunning) {
@@ -674,29 +680,30 @@ void updateSimulation(void)
 
         // compute collisions
         vector<Contact*> collisions;
-        if (CollisionDetector::findCollisions(object1_position_constrained, object1_position_unconstrained ,object1_vertices, object1_triangles,
-                                              Vector3d(0,0,0),Vector3d(0,0,0), object2_vertices, object2_triangles, // is static
+        if (CollisionDetector::findCollisionsRigid(q_constrained_1, q_unconstrained_1, object1_vertices, object1_triangles,
+                                              q_constrained_2, q_unconstrained_2, object2_vertices, object2_triangles,
                                               collisions))
         {
 //            object1_velocity_constrained.setZero();
 //            object1_position_constrained = object1_position_unconstrained;
 //            object1_velocity_unconstrained.setZero();
 
-            ImplicitLCP::setup_implicit_lcp_haptic_friction(object1_position_constrained, object1_position_unconstrained,
-                                                   object1_velocity_constrained, object1_velocity_unconstrained, collisions, dt);
+            ImplicitLCP::setup_implicit_lcp_rigid(q_constrained_1, q_unconstrained_1,
+                                                  u_constrained_1, u_unconstrained_1, M, collisions, dt);
         }
         else
         {
-            object1_velocity_constrained = object1_velocity_unconstrained;
-            object1_position_constrained = object1_position_unconstrained;
+            u_constrained_1 = u_unconstrained_1;
+            q_constrained_1 = q_unconstrained_1;
         }
 
         // the the global variable for the god object position
-        god_object_pos = cVector3d(object1_position_constrained);
+        god_object_pos = cVector3d(q_constrained_1.block<3,1>(0,0));
 
         // update the device velocity
-        object1_position_unconstrained = device_pos.eigen();
-        object1_velocity_unconstrained = (object1_position_unconstrained - object1_position_constrained);
+        q_unconstrained_1.block<3,1>(0,0) = device_pos.eigen();
+        u_unconstrained_1.block<3,1>(0,0) = (q_unconstrained_1.block<3,1>(0,0) -
+                q_constrained_1.block<3,1>(0,0));
 
 
         for (auto ptr : collisions)
@@ -704,7 +711,9 @@ void updateSimulation(void)
             delete [] ptr;
         }
 
-        object1->setLocalPos(object1_position_constrained);
+        object1->setLocalPos(q_constrained_1.block<3,1>(0,0));
+        object1->setLocalRot(Quaterniond(q_constrained_1(3),q_constrained_1(4),
+                                         q_constrained_1(5),q_constrained_1(6)).toRotationMatrix());
 
         // update frequency counter
         freqCounterSimulation.signal(1);

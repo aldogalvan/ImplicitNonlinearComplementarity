@@ -286,16 +286,19 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
     return flag;
 }
 
-bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const Vector3d& object1_pos_end,
-                    const Quaterniond& object1_rot_start, const Quaterniond& object1_rot_end,
+bool CollisionDetector::findCollisionsRigid(const VectorXd& object1_start_, const VectorXd& object1_end_,
                     const MatrixXd& object1_vertices, const MatrixXi& object1_tris,
-                    const Quaterniond& object2_rot_start, const Quaterniond& object2_rot_end,
-                    const Vector3d& object2_pos_start, const Vector3d& object2_pos_end, const MatrixXd& object2_vertices, const MatrixXi& object2_tris,
+                   const VectorXd& object2_start_, const VectorXd& object2_end_,
+                    const MatrixXd& object2_vertices, const MatrixXi& object2_tris,
                     vector<Contact*>& collisions)
 {
     bool flag = false;
 
     // object1 vertices
+    VectorXd object1_pos_start = object1_start_.block<3,1>(0,0);
+    VectorXd object1_pos_end = object1_end_.block<3,1>(0,0);
+    Quaterniond object1_rot_start(object1_start_(3),object1_start_(4),object1_start_(5),object1_start_(6));
+    Quaterniond object1_rot_end(object1_end_(3),object1_end_(4),object1_end_(5),object1_end_(6));
     MatrixXd object1_start, object1_end;
     object1_start = object1_vertices; object1_end = object1_vertices;
     applyQuaternionRotation(object1_start,object1_rot_start);
@@ -304,6 +307,10 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
     object1_end.rowwise() += object1_pos_end.transpose();
 
     // object2 vertices
+    VectorXd object2_pos_start = object2_start_.block<3,1>(0,0);
+    VectorXd object2_pos_end = object2_end_.block<3,1>(0,0);
+    Quaterniond object2_rot_start(object2_start_(3),object2_start_(4),object2_start_(5),object2_start_(6));
+    Quaterniond object2_rot_end(object2_end_(3),object2_end_(4),object2_end_(5),object2_end_(6));
     MatrixXd object2_start, object2_end;
     object2_start = object2_vertices; object2_end = object2_vertices;
     applyQuaternionRotation(object2_start,object2_rot_start);
@@ -343,7 +350,7 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 collisions.back()->normal = n1;
-                collisions.back()->bodyIdxA = 1;
+                collisions.back()->bodyIdxA = 0;
                 collisions.back()->bodyIdxB = -1;
                 collisions.back()->depth = (v1 - a1).dot(n1);
                 // find the contacting point
@@ -381,7 +388,7 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 collisions.back()->normal = n1;
                 collisions.back()->bodyIdxA = -1;
-                collisions.back()->bodyIdxB = 1;
+                collisions.back()->bodyIdxB = 0;
                 collisions.back()->depth = ((v1 - a1).dot(n1));
                 // find the contacting point
                 Vector3d P = v1 - collisions.back()->depth * n1;

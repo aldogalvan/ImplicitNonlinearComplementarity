@@ -30,11 +30,11 @@ inline VectorXd gauss_seidel(const MatrixXd& A, const VectorXd& b, VectorXd& lam
         iter++;
     }
 
-    if (iter == max_iter) {
-        std::cout << "Gauss-Seidel reached the maximum number of iterations without converging." << std::endl;
-    } else {
-        std::cout << "Gauss-Seidel converged in " << iter << " iterations." << std::endl;
-    }
+//    if (iter == max_iter) {
+//        std::cout << "Gauss-Seidel reached the maximum number of iterations without converging." << std::endl;
+//    } else {
+//        std::cout << "Gauss-Seidel converged in " << iter << " iterations." << std::endl;
+//    }
 
     return residual;
 }

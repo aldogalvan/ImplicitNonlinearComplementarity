@@ -1,5 +1,6 @@
 #include "objects.hpp"
 
+
 void RigidObject::set_local_pos(Eigen::Vector3d pos) {
     this->setLocalPos(pos);
     x_unconstrained = pos;
@@ -12,8 +13,8 @@ MatrixXd RigidObject::kinematic_map_G()
     G.block<3,3>(0,0) = MatrixXd::Identity(3,3);
     G(3,3) =  -0.5*q.x();  G(3,4) =  -0.5*q.y(); G(3,5) =  -0.5*q.z();
     G(4,3) =  0.5*q.w();  G(4,4)  =   0.5*q.z(); G(4,5) =  -0.5*q.y();
-    G(5,3) =  -0.5*q.z();  G(4,4) =  0.5*q.w(); G(4,5) =  0.5*q.x();
-    G(6,3) =  0.5*q.y();  G(4,4)  =  -0.5*q.x(); G(4,5) =  0.5*q.w();
+    G(5,3) =  -0.5*q.z();  G(5,4) =  0.5*q.w(); G(5,5) =  0.5*q.x();
+    G(6,3) =  0.5*q.y();  G(6,4)  =  -0.5*q.x(); G(6,5) =  0.5*q.w();
     return G;
 }
 
@@ -23,8 +24,8 @@ MatrixXd RigidObject::kinematic_map_G(Quaterniond q)
     G.block<3,3>(0,0) = MatrixXd::Identity(3,3);
     G(3,3) =  -0.5*q.x();  G(3,4)  =  -0.5*q.y(); G(3,5) =  -0.5*q.z();
     G(4,3) =   0.5*q.w();  G(4,4)  =   0.5*q.z(); G(4,5) =  -0.5*q.y();
-    G(5,3) =  -0.5*q.z();  G(4,4)  =   0.5*q.w(); G(4,5) =   0.5*q.x();
-    G(6,3) =   0.5*q.y();  G(4,4)  =  -0.5*q.x(); G(4,5) =   0.5*q.w();
+    G(5,3) =  -0.5*q.z();  G(5,4)  =   0.5*q.w(); G(5,5) =   0.5*q.x();
+    G(6,3) =   0.5*q.y();  G(6,4)  =  -0.5*q.x(); G(6,5) =   0.5*q.w();
     return G;
 }
 
