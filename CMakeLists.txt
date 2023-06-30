@@ -58,6 +58,7 @@ add_executable(RigidBodiesDemo rigid_bodies_demo.cpp)
 add_executable(HapticsDemoQuasistatic haptics_demo_quasistatic.cpp)
 add_executable(HapticsDemo haptics_demo.cpp)
 add_executable(HapticsDemoRigid haptics_demo_rigid.cpp)
+add_executable(HapticsDemoDeformable haptics_demo_deformable.cpp)
 
 add_definitions(-DTETLIBRARY)
 target_link_libraries(RigidBodiesDemo PUBLIC
@@ -67,6 +68,8 @@ target_link_libraries(HapticsDemoQuasistatic PUBLIC
 target_link_libraries(HapticsDemo PUBLIC
         ImplicitLCP)
 target_link_libraries(HapticsDemoRigid PUBLIC
+        ImplicitLCP)
+target_link_libraries(HapticsDemoDeformable PUBLIC
         ImplicitLCP)
 
 

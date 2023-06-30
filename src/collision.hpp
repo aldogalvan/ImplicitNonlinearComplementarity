@@ -6,7 +6,7 @@
 #include <vector>
 #include "objects.hpp"
 #include "aabb.hpp"
-#include "contact.h"
+#include "contact.hpp"
 
 using namespace Eigen;
 using namespace std;
@@ -28,11 +28,17 @@ public:
                         const Vector3d& object2_pos_start, const Vector3d& object2_pos_end, const MatrixXd& object2_vertices, const MatrixXi& object2_tris,
                         vector<Contact*>& collisions);
 
-    static bool findCollisionsRigid(const VectorXd& object1_start_, const VectorXd& object1_end_,
+    static bool findCollisionsRigid(const VectorXd& object1_start_position, const VectorXd& object1_end_position,
                                const MatrixXd& object1_vertices, const MatrixXi& object1_tris,
-                               const VectorXd& object2_start_, const VectorXd& object2_end_,
+                               const VectorXd& object2_start_position, const VectorXd& object2_end_position,
                                const MatrixXd& object2_vertices, const MatrixXi& object2_tris,
                                vector<Contact*>& collisions);
+
+    static bool findCollisionsDeformable(const VectorXd& object1_start_vertices, const VectorXd& object1_end_vertices,
+                                         const MatrixXi& object1_tris, const MatrixXi& object1_tets,
+                                         const VectorXd& object2_start_vertices, const VectorXd& object2_end_vertices,
+                                         const MatrixXi& object2_tris, const MatrixXi& object2_tets,
+                                         vector<Contact*>& collisions);
 
     // the objects in this detector
     vector<RigidObject*> m_objects;
