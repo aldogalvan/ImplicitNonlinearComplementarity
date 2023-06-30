@@ -83,6 +83,11 @@ public:
     bool is_static = false;
 };
 
+class GodObject : public RigidObject
+{
+
+};
+
 class DeformableObject : public Object
 {
 public:
@@ -102,14 +107,11 @@ public:
     Vector3d com;
 };
 
-class GodObject : public Object
+class DeformableGodObject : public DeformableObject
 {
 public:
 
-    GodObject(int idx) : Object(idx)
-    {
 
-    }
 };
 
 #endif //IMPLICITNONLINEARCOMPLEMENTARITY_LCP_HPP
