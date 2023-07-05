@@ -487,7 +487,7 @@ bool LCP::setup_lcp(VectorXd& tau, vector<Contact*>& collisions)
     // friction cone basis matrix
     for (int colIdx = 0; colIdx < numCollisions; colIdx ++)
     {
-        Vector3d normal = collisions[colIdx]->normal;
+        Vector3d normal = collisions[colIdx]->n;
         MatrixXd D = getDirectionVectors(normal);
 
         //

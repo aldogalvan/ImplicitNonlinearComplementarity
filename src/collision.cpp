@@ -3,15 +3,17 @@
 #include <iostream>
 #include "helper.hpp"
 
-inline Eigen::Vector3d refinePoint(const Eigen::Vector3d& p, const Eigen::Vector3d& objectPosition, const Eigen::Quaterniond& objectRotation)
+
+
+inline Vector3d refinePoint(const Vector3d& p, const Vector3d& objectPosition, const Quaterniond& objectRotation)
 {
     // Create the object's transformation matrix
-    Eigen::Affine3d objectTransform;
+    Affine3d objectTransform;
     objectTransform.translation() = objectPosition;
     objectTransform.linear() = objectRotation.toRotationMatrix();
 
     // Apply the inverse transformation to the point
-    Eigen::Vector3d refinedPoint = objectTransform.inverse() * p;
+    Vector3d refinedPoint = objectTransform.inverse() * p;
 
     return refinedPoint;
 }
@@ -47,29 +49,41 @@ Vector3d closestPointOnTriangle(const Vector3d& A, const Vector3d& B, const Vect
 
 void CollisionDetector::computeCollisions()
 {
+    // delete the current contacts
+    for (auto c : m_contacts) {delete [] c;}
+    m_contacts.clear();
+
     // Nested loops to iterate through the vector
     for (size_t i = 0; i < m_objects.size(); ++i) {
         for (size_t j = i + 1; j < m_objects.size(); ++j)
         {
+            assert(m_objects[i] != NULL && m_objects[j] != NULL);
             // Call the function for each pair of objects
-            computeCollisions(m_objects[i],m_objects[j]);
+            if (m_objects[i]->type == RIGID && m_objects[j]->type == RIGID)
+                computeCollisionsRigidRigid(dynamic_cast<RigidObject*>(m_objects[i]),dynamic_cast<RigidObject*>(m_objects[j]));
+            else if (m_objects[i]->type == DEFORMABLE && m_objects[j]->type == DEFORMABLE)
+                computeCollisionsDeformableDeformable(dynamic_cast<DeformableObject*>(m_objects[i]),dynamic_cast<DeformableObject*>(m_objects[j]));
+            else if (m_objects[i]->type == RIGID && m_objects[j]->type == DEFORMABLE)
+                computeCollisionsRigidDeformable(dynamic_cast<RigidObject*>(m_objects[i]),dynamic_cast<DeformableObject*>(m_objects[j]));
+            else if (m_objects[i]->type == DEFORMABLE && m_objects[j]->type == RIGID)
+                computeCollisionsRigidDeformable(dynamic_cast<RigidObject*>(m_objects[j]),dynamic_cast<DeformableObject*>(m_objects[i]));
         }
     }
 }
 
-void CollisionDetector::computeCollisions(RigidObject* object1, RigidObject* object2)
+void CollisionDetector::computeCollisionsRigidRigid(RigidObject* object1, RigidObject* object2)
 {
     // declare Object 1
-    MatrixXd& object1_vertices = object1->vertices;
-    MatrixXi& object1_triangles = object1->triangles;
-    Vector3d& object1_pos_start = object1->x; Vector3d& object1_pos_end = object1->x_unconstrained;
-    Quaterniond& object1_rot_start = object1->q; Quaterniond& object1_rot_end = object1->q_unconstrained;
+    const MatrixXd& object1_vertices = object1->vertices();
+    const MatrixXi& object1_triangles = object1->triangles();
+    Vector3d& object1_pos_start = object1->x_last; Vector3d& object1_pos_end = object1->x;
+    Quaterniond& object1_rot_start = object1->q_last; Quaterniond& object1_rot_end = object1->q;
 
     // declare Object 2
-    MatrixXd& object2_vertices = object2->vertices;
-    MatrixXi& object2_triangles = object2->triangles;
-    Vector3d& object2_pos_start = object2->x; Vector3d& object2_pos_end = object2->x_unconstrained;
-    Quaterniond& object2_rot_start = object2->q; Quaterniond& object2_rot_end = object2->q_unconstrained;
+    const MatrixXd& object2_vertices = object2->vertices();
+    const MatrixXi& object2_triangles = object2->triangles();
+    Vector3d& object2_pos_start = object2->x_last; Vector3d& object2_pos_end = object2->x;
+    Quaterniond& object2_rot_start = object2->q_last; Quaterniond& object2_rot_end = object2->q;
 
     // object1 vertices
     MatrixXd object1_start, object1_end;
@@ -99,7 +113,7 @@ void CollisionDetector::computeCollisions(RigidObject* object1, RigidObject* obj
     //////////////////////////////////////////////////////////
 
     for (const auto& it : potentialCollisions) {
-        Eigen::Vector3i face = object2_triangles.row(it.collidingTriangle2);
+        Vector3i face = object2_triangles.row(it.collidingTriangle2);
         for (int vert = 0; vert < 3; vert++) {
             int vidx = object1_triangles(it.collidingTriangle1, vert);
             double t;
@@ -120,21 +134,19 @@ void CollisionDetector::computeCollisions(RigidObject* object1, RigidObject* obj
                     1e-6,
                     t))
             {
-                m_contacts.emplace_back(new Contact);
+                m_contacts.emplace_back(new Contact(object1,object2));
                 m_contacts.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
-                m_contacts.back()->normal = n1;
+                m_contacts.back()->n = n1;
                 m_contacts.back()->bodyIdxA = object1->m_idx;
                 m_contacts.back()->bodyIdxB = object2->m_idx;
                 m_contacts.back()->depth = (v1 - a1).dot(n1);
-                cout << "DEBUG : depth = " << m_contacts.back()->depth << endl;
 
                 // find the contacting point
                 Vector3d P = v1 - m_contacts.back()->depth * n1;
                 m_contacts.back()->contact_pt = P;
                 m_contacts.back()->contact_wrt_bodyA = refinePoint(v1,object1_pos_end,object1_rot_end);
                 m_contacts.back()->contact_wrt_bodyB = refinePoint(P,object2_pos_end,object2_rot_end);
-                cout << "DEBUG : depthtest = " << (object1_rot_end*m_contacts.back()->contact_wrt_bodyA + object1_pos_end - (object2_rot_end*m_contacts.back()->contact_wrt_bodyB + object2_pos_end)).dot(n1) << endl;
             }
         }
     }
@@ -144,7 +156,7 @@ void CollisionDetector::computeCollisions(RigidObject* object1, RigidObject* obj
     //////////////////////////////////////////////////////////
 
     for (const auto& it : potentialCollisions) {
-        Eigen::Vector3i face = object1_triangles.row(it.collidingTriangle1);
+        Vector3i face = object1_triangles.row(it.collidingTriangle1);
         for (int vert = 0; vert < 3; vert++) {
             int vidx = object2_triangles(it.collidingTriangle2, vert);
             double t;
@@ -163,25 +175,27 @@ void CollisionDetector::computeCollisions(RigidObject* object1, RigidObject* obj
                     1e-6,
                     t))
             {
-                m_contacts.emplace_back(new Contact);
+
+                m_contacts.emplace_back(new Contact(object2,object1));
                 m_contacts.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
-                m_contacts.back()->normal = n1;
+                m_contacts.back()->n = n1;
                 m_contacts.back()->bodyIdxA = object2->m_idx;
                 m_contacts.back()->bodyIdxB = object1->m_idx;
                 m_contacts.back()->depth = ((v1 - a1).dot(n1));
-                cout << "DEBUG : depth = " << m_contacts.back()->depth << endl;
                 // find the contacting point
                 Vector3d P = v1 - m_contacts.back()->depth * n1;
                 m_contacts.back()->contact_pt = P;
                 m_contacts.back()->contact_wrt_bodyA = refinePoint(v1,object2_pos_end,object2_rot_end);
                 m_contacts.back()->contact_wrt_bodyB = refinePoint(P,object1_pos_end,object1_rot_end);
-                cout << "DEBUG : depthtest = " << (object2_rot_end*m_contacts.back()->contact_wrt_bodyA + object2_pos_end - (object1_rot_end*m_contacts.back()->contact_wrt_bodyB + object1_pos_end)).dot(n1) << endl;
 
             }
         }
     }
 }
+
+void CollisionDetector::computeCollisionsRigidDeformable(RigidObject* rigidObject, DeformableObject* deformableObject){cout << "NOT WORKING" << endl;}
+void CollisionDetector::computeCollisionsDeformableDeformable(DeformableObject* deformableObject1, DeformableObject* deformableObject2){cout << "NOT WORKING" << endl;}
 
 bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const Vector3d& object1_pos_end, const MatrixXd& object1_vertices, const MatrixXi& object1_tris,
                     const Vector3d& object2_pos_start, const Vector3d& object2_pos_end, const MatrixXd& object2_vertices, const MatrixXi& object2_tris,
@@ -208,7 +222,7 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
     intersect(object1_aabb,object2_aabb,potentialCollisions);
 
     for (const auto& it : potentialCollisions) {
-        Eigen::Vector3i face = object2_tris.row(it.collidingTriangle2);
+        Vector3i face = object2_tris.row(it.collidingTriangle2);
         for (int vert = 0; vert < 3; vert++) {
             int vidx = object1_tris(it.collidingTriangle1, vert);
             double t;
@@ -233,7 +247,7 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
                 collisions.emplace_back(new Contact);
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
-                collisions.back()->normal = n1;
+                collisions.back()->n = n1;
                 collisions.back()->bodyIdxA = 0;
                 collisions.back()->bodyIdxB = -1;
                 collisions.back()->depth = (v1 - a1).dot(n1);
@@ -248,7 +262,7 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
     }
 
     for (const auto& it : potentialCollisions) {
-        Eigen::Vector3i face = object1_tris.row(it.collidingTriangle1);
+        Vector3i face = object1_tris.row(it.collidingTriangle1);
         for (int vert = 0; vert < 3; vert++) {
             int vidx = object2_tris(it.collidingTriangle2, vert);
             double t;
@@ -270,7 +284,7 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
                 collisions.emplace_back(new Contact);
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
-                collisions.back()->normal = n1;
+                collisions.back()->n = n1;
                 collisions.back()->bodyIdxA = -1;
                 collisions.back()->bodyIdxB = 0;
                 collisions.back()->depth = ((v1 - a1).dot(n1));
@@ -286,7 +300,7 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
     return flag;
 }
 
-bool CollisionDetector::findCollisionsRigid(const VectorXd& object1_start_position, const VectorXd& object1_end_position,
+bool CollisionDetector::findCollisionsRigidRigid(const VectorXd& object1_start_position, const VectorXd& object1_end_position,
                     const MatrixXd& object1_vertices, const MatrixXi& object1_tris,
                    const VectorXd& object2_start_position, const VectorXd& object2_end_position,
                     const MatrixXd& object2_vertices, const MatrixXi& object2_tris,
@@ -325,7 +339,7 @@ bool CollisionDetector::findCollisionsRigid(const VectorXd& object1_start_positi
     intersect(object1_aabb,object2_aabb,potentialCollisions);
 
     for (const auto& it : potentialCollisions) {
-        Eigen::Vector3i face = object2_tris.row(it.collidingTriangle2);
+        Vector3i face = object2_tris.row(it.collidingTriangle2);
         for (int vert = 0; vert < 3; vert++) {
             int vidx = object1_tris(it.collidingTriangle1, vert);
             double t;
@@ -349,7 +363,7 @@ bool CollisionDetector::findCollisionsRigid(const VectorXd& object1_start_positi
                 collisions.emplace_back(new Contact);
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
-                collisions.back()->normal = n1;
+                collisions.back()->n = n1;
                 collisions.back()->bodyIdxA = 0;
                 collisions.back()->bodyIdxB = -1;
                 collisions.back()->depth = (v1 - a1).dot(n1);
@@ -364,7 +378,7 @@ bool CollisionDetector::findCollisionsRigid(const VectorXd& object1_start_positi
     }
 
     for (const auto& it : potentialCollisions) {
-        Eigen::Vector3i face = object1_tris.row(it.collidingTriangle1);
+        Vector3i face = object1_tris.row(it.collidingTriangle1);
         for (int vert = 0; vert < 3; vert++) {
             int vidx = object2_tris(it.collidingTriangle2, vert);
             double t;
@@ -386,7 +400,7 @@ bool CollisionDetector::findCollisionsRigid(const VectorXd& object1_start_positi
                 collisions.emplace_back(new Contact);
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
-                collisions.back()->normal = n1;
+                collisions.back()->n = n1;
                 collisions.back()->bodyIdxA = -1;
                 collisions.back()->bodyIdxB = 0;
                 collisions.back()->depth = ((v1 - a1).dot(n1));
@@ -402,7 +416,7 @@ bool CollisionDetector::findCollisionsRigid(const VectorXd& object1_start_positi
     return flag;
 }
 
-bool CollisionDetector::findCollisionsDeformable(const VectorXd& object1_start_vertices, const VectorXd& object1_end_vertices,
+bool CollisionDetector::findCollisionsDeformableDeformable(const VectorXd& object1_start_vertices, const VectorXd& object1_end_vertices,
                                              const MatrixXi& object1_tris, const MatrixXi& object1_tets,
                                             const VectorXd& object2_start_vertices, const VectorXd& object2_end_vertices,
                                             const MatrixXi& object2_tris, const MatrixXi& object2_tets,
@@ -423,7 +437,7 @@ bool CollisionDetector::findCollisionsDeformable(const VectorXd& object1_start_v
     intersect(object1_aabb,object2_aabb,potentialCollisions);
 
     for (const auto& it : potentialCollisions) {
-        Eigen::Vector3i face = object2_tris.row(it.collidingTriangle2);
+        Vector3i face = object2_tris.row(it.collidingTriangle2);
         for (int vert = 0; vert < 3; vert++) {
             int vidx = object1_tris(it.collidingTriangle1, vert);
             double t;
@@ -447,7 +461,7 @@ bool CollisionDetector::findCollisionsDeformable(const VectorXd& object1_start_v
                 collisions.emplace_back(new Contact);
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
-                collisions.back()->normal = n1;
+                collisions.back()->n = n1;
                 collisions.back()->bodyIdxA = 0;
                 collisions.back()->bodyIdxB = -1;
                 collisions.back()->depth = (v1 - a1).dot(n1);
@@ -460,7 +474,7 @@ bool CollisionDetector::findCollisionsDeformable(const VectorXd& object1_start_v
     }
 
     for (const auto& it : potentialCollisions) {
-        Eigen::Vector3i face = object1_tris.row(it.collidingTriangle1);
+        Vector3i face = object1_tris.row(it.collidingTriangle1);
         for (int vert = 0; vert < 3; vert++) {
             int vidx = object2_tris(it.collidingTriangle2, vert);
             double t;
@@ -482,7 +496,7 @@ bool CollisionDetector::findCollisionsDeformable(const VectorXd& object1_start_v
                 collisions.emplace_back(new Contact);
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
-                collisions.back()->normal = n1;
+                collisions.back()->n = n1;
                 collisions.back()->bodyIdxA = -1;
                 collisions.back()->bodyIdxB = 0;
                 collisions.back()->depth = ((v1 - a1).dot(n1));

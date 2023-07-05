@@ -1,12 +1,10 @@
 #include <iostream>
 #include "chai3d.h"
 #include <Eigen/Dense>
-#include "src/collision.hpp"
-#include "src/implicit_lcp.hpp"
-#include "tetgen/tetgen.h"
+#include "PegInHole.hpp"
 #include "imgui.h"
 //------------------------------------------------------------------------------
-#include "extras/GLFW/include/GLFW/glfw3.h"
+#include "GLFW/glfw3.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 //------------------------------------------------------------------------------
@@ -52,20 +50,8 @@ bool mirroredDisplay = false;
 // DECLARED VARIABLES
 //------------------------------------------------------------------------------
 
-// the device position
-cVector3d device_pos;
-
-// the god object position
-cVector3d god_object_pos;
-
-// the haptic device velocity
-cVector3d device_velocity;
-
-// the sphere
-DeformableObject* deformableObject;
-
-// the plane
-RigidObject* rigidObject;
+// simulation
+PegInHole* simulator;
 
 // a world that contains all objects of the virtual environment
 cWorld* world;
@@ -340,23 +326,6 @@ int main(int argc, char* argv[])
     light->setLocalPos(cVector3d(1,0,0));
     light->setDir(-1, 0, 0.0);
 
-    deformableObject   = new DeformableObject(0);
-    deformableObject->create_tetrahedral_mesh("/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/sphere.off");
-    deformableObject->getMesh(0)->m_material->setRed();
-    deformableObject->m_material->setShininess(0.75);
-    deformableObject->setLocalPos(cVector3d(0.0,0,0.0));
-    world->addChild(deformableObject);
-
-    rigidObject = new RigidObject(1);
-    rigidObject->loadFromFile("/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/model.obj");
-    rigidObject->import_mesh_data();
-    rigidObject->setLocalPos(cVector3d(0.0,0.0,0.0));
-    rigidObject->m_material->setShininess(0.75);
-    rigidObject->getMesh(0)->m_material->setBlueCyan();
-    world->addChild(rigidObject);
-
-    world->computeGlobalPositions();
-
     //--------------------------------------------------------------------------
     // HAPTIC DEVICE
     //--------------------------------------------------------------------------
@@ -397,7 +366,6 @@ int main(int argc, char* argv[])
     //--------------------------------------------------------------------------
     // START SIMULATION
     //--------------------------------------------------------------------------
-
 
     // create a thread which starts the main haptics rendering loop
     hapticsThread = new cThread();
@@ -631,10 +599,6 @@ void updateGraphics(void)
     // RENDER SCENE
     /////////////////////////////////////////////////////////////////////
 
-    // update the meshes
-    deformableObject->update_mesh_position();
-    rigidObject->update_mesh_position();
-
     // update shadow maps (if any)
     world->updateShadowMaps(false, mirroredDisplay);
 
@@ -660,24 +624,12 @@ void updateSimulation(void)
 
     cPrecisionClock clock;
 
-    ImplicitLCP implicitLcp;
-
     // main haptic simulation loop
     while (simulationRunning) {
 
         clock.stop();
         double dt = clock.getCurrentTimeSeconds();
         clock.start(true);
-
-        vector<Contact*> contacts;
-
-        // step the simulation
-        implicitLcp.setup_implicit_lcp_deformable_linear(rigidObject,deformableObject,contacts,dt);
-
-        for (auto c: contacts)
-        {
-            delete [] c;
-        }
 
         // update frequency counter
         freqCounterSimulation.signal(1);
@@ -706,13 +658,6 @@ void updateHaptics(void) {
         clock.stop();
         double dt = clock.getCurrentTimeSeconds();
         clock.start(true);
-
-        hapticDevice->getPosition(device_pos);
-        device_pos *= scale_factor;
-        device_pos += start_pos;
-
-        hapticDevice->getLinearVelocity(device_velocity);
-        device_velocity *= scale_factor;
 
         Vector3d force(0,0,0);
 

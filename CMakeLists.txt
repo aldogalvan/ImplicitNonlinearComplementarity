@@ -16,7 +16,6 @@ INCLUDE_DIRECTORIES(${CHAI3D_INCLUDE_DIRS})
 
 #EIGEN3
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D__CUDACC__")
 
 # GLFW
 if (EXISTS ${PROJECT_SOURCE_DIR}/extras/GLFW)
@@ -32,20 +31,16 @@ set(DRAKE_PYTHONPATH
         )
 
 add_subdirectory(external/collisiondetection)
+include_directories(extras/GLFW/include)
 include_directories(external/collisiondetection/include)
+include_directories(external/tetgen)
 include_directories(include/imgui)
 include_directories(include/imgui/backends)
+include_directories(src)
 
-#add_executable(ImplicitNonlinearComplementarity main1.cpp implicit_lcp.cpp implicit_lcp.hpp lcp.cpp lcp.hpp collision.cpp collision.hpp aabb.cpp aabb.hpp objects.hpp helper.hpp)
-#add_executable(ImplicitNonlinearComplementarity main2.cpp implicit_lcp.cpp implicit_lcp.hpp lcp.cpp lcp.hpp collision.cpp collision.hpp aabb.cpp aabb.hpp objects.hpp helper.hpp)
-#add_executable(ImplicitNonlinearComplementarity main3.cpp tetgen/*.cpp tetgen/*.h
-#        implicit_lcp.cpp implicit_lcp.hpp lcp.cpp lcp.hpp collision.cpp collision.hpp
-#        aabb.cpp aabb.hpp objects.hpp helper.hpp)
-
-add_library(ImplicitLCP src/lcp.cpp src/lcp.hpp src/implicit_lcp.cpp src/implicit_lcp.hpp
-        src/collision.cpp src/collision.hpp src/aabb.cpp src/aabb.hpp
-        src/objects.cpp src/objects.hpp src/helper.hpp src/solvers.cpp
-        src/pgs.hpp src/pgs.cpp)
+file(GLOB_RECURSE IMPLICIT_LCP_SOURCES  src/*.cpp src/*.h external/tetgen/*.cpp external/tetgen/*.h)
+add_library(ImplicitLCP ${IMPLICIT_LCP_SOURCES})
+add_definitions(-DTETLIBRARY)
 
 target_link_libraries(ImplicitLCP PUBLIC
         collisiondetection
@@ -54,22 +49,27 @@ target_link_libraries(ImplicitLCP PUBLIC
         Eigen3::Eigen
         drake::drake)
 
-add_executable(RigidBodiesDemo rigid_bodies_demo.cpp)
-add_executable(HapticsDemoQuasistatic haptics_demo_quasistatic.cpp)
-add_executable(HapticsDemo haptics_demo.cpp)
-add_executable(HapticsDemoRigid haptics_demo_rigid.cpp)
-add_executable(HapticsDemoDeformable haptics_demo_deformable.cpp)
+#add_executable(RigidBodiesDemo rigid_bodies_demo.cpp)
+#add_executable(HapticsDemoQuasistatic haptics_demo_quasistatic.cpp)
+#add_executable(HapticsDemo haptics_demo.cpp)
+#add_executable(HapticsDemoRigid haptics_demo_rigid.cpp)
+#add_executable(HapticsDemoDeformable haptics_demo_deformable.cpp)
+add_executable(PegInHole simulations/PegInHole/main.cpp simulations/PegInHole/PegInHole.cpp)
+add_executable(RigidBodyDemo simulations/RigidBodyDemo/main.cpp simulations/RigidBodyDemo/RigidBodyDemo.cpp)
 
-add_definitions(-DTETLIBRARY)
-target_link_libraries(RigidBodiesDemo PUBLIC
-        ImplicitLCP)
-target_link_libraries(HapticsDemoQuasistatic PUBLIC
-        ImplicitLCP)
-target_link_libraries(HapticsDemo PUBLIC
-        ImplicitLCP)
-target_link_libraries(HapticsDemoRigid PUBLIC
-        ImplicitLCP)
-target_link_libraries(HapticsDemoDeformable PUBLIC
-        ImplicitLCP)
+
+
+#target_link_libraries(RigidBodiesDemo PUBLIC
+#        ImplicitLCP)
+#target_link_libraries(HapticsDemoQuasistatic PUBLIC ImplicitLCP)
+#target_link_libraries(HapticsDemo PUBLIC ImplicitLCP)
+#target_link_libraries(HapticsDemoRigid PUBLIC ImplicitLCP)
+#target_link_libraries(HapticsDemoDeformable PUBLIC ImplicitLCP)
+target_link_libraries(PegInHole PUBLIC ImplicitLCP)
+target_link_libraries(RigidBodyDemo PUBLIC ImplicitLCP)
+
+
+add_subdirectory(simulations/PegInHoleQt)
+
 
 

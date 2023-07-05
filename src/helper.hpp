@@ -6,6 +6,50 @@
 
 using namespace Eigen;
 
+inline double computeTetrahedronVolume(const Vector3d& vertex1, const Vector3d& vertex2, const Vector3d& vertex3, const Vector3d& vertex4)
+{
+    // Calculate vectors representing three edges of the tetrahedron
+    Vector3d edge1 = vertex2 - vertex1;
+    Vector3d edge2 = vertex3 - vertex1;
+    Vector3d edge3 = vertex4 - vertex1;
+
+    // Calculate the volume using the scalar triple product
+    double volume = edge1.dot(edge2.cross(edge3)) / 6.0;
+
+    return std::abs(volume);
+}
+
+inline Eigen::Quaterniond generateQuaternion(double rotation_x_deg, double rotation_y_deg, double rotation_z_deg)
+{
+    double rotation_x_rad = rotation_x_deg * M_PI / 180.0; // Convert degrees to radians
+    double rotation_y_rad = rotation_y_deg * M_PI / 180.0;
+    double rotation_z_rad = rotation_z_deg * M_PI / 180.0;
+
+    Eigen::AngleAxisd rot_x(rotation_x_rad, Eigen::Vector3d::UnitX());
+    Eigen::AngleAxisd rot_y(rotation_y_rad, Eigen::Vector3d::UnitY());
+    Eigen::AngleAxisd rot_z(rotation_z_rad, Eigen::Vector3d::UnitZ());
+
+    Eigen::Quaterniond quaternion = rot_z * rot_y * rot_x;
+
+    return quaternion;
+}
+
+inline Eigen::Quaterniond multiplyQuaternionScalar( double scalar,const Eigen::Quaterniond& q)
+{
+    Eigen::Quaterniond result;
+    result.coeffs() = q.coeffs() * scalar;
+    return result;
+}
+
+
+inline Eigen::Quaterniond sumQuaternions(const Eigen::Quaterniond& q1, const Eigen::Quaterniond& q2)
+{
+    Eigen::Quaterniond sum;
+    sum.coeffs() = q1.coeffs() + q2.coeffs();
+    return sum;
+}
+
+
 inline Vector3d checkNearZero(const Eigen::Vector3d& vector) {
     double threshold = 1e-6;
 

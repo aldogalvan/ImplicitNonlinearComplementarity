@@ -680,7 +680,7 @@ void updateSimulation(void)
 
         // compute collisions
         vector<Contact*> collisions;
-        if (CollisionDetector::findCollisionsRigid(q_constrained_1, q_unconstrained_1, object1_vertices, object1_triangles,
+        if (CollisionDetector::findCollisionsRigidRigid(q_constrained_1, q_unconstrained_1, object1_vertices, object1_triangles,
                                               q_constrained_2, q_unconstrained_2, object2_vertices, object2_triangles,
                                               collisions))
         {
