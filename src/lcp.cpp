@@ -491,30 +491,30 @@ bool LCP::setup_lcp(VectorXd& tau, vector<Contact*>& collisions)
         MatrixXd D = getDirectionVectors(normal);
 
         //
-        int bodyIdxA = collisions[colIdx]->bodyIdxA;
-        int bodyIdxB = collisions[colIdx]->bodyIdxB;
+        int objectIdxA = collisions[colIdx]->objectIdxA;
+        int objectIdxB = collisions[colIdx]->objectIdxB;
 
         //
         MatrixXd Ja; MatrixXd Jb;
 
         // contact jacobians
-        if (collisions[colIdx]->bodyIdxA == 0)
+        if (collisions[colIdx]->objectIdxA == 0)
         {
             Ja = -contactJacobian(normal, Vector3d(0, 0, 0));
             Jb = contactJacobian(normal, Vector3d(0, 0, 0));
         }
-        else if (collisions[colIdx]->bodyIdxA == 1)
+        else if (collisions[colIdx]->objectIdxA == 1)
         {
             Ja = contactJacobian(normal, Vector3d(0, 0, 0));
             Jb = -contactJacobian(normal, Vector3d(0, 0, 0));
         }
 
-        N.block<3, 1>(3 * bodyIdxA, colIdx) = Ja * normal;
-        N.block<3, 1>(3 * bodyIdxB, colIdx) = Jb * normal;
+        N.block<3, 1>(3 * objectIdxA, colIdx) = Ja * normal;
+        N.block<3, 1>(3 * objectIdxB, colIdx) = Jb * normal;
 
         // add to tangential jacobian
-        B.block<3,4>(3*bodyIdxA,basis_dim*colIdx) = Ja*D;
-        B.block<3,4>(3*bodyIdxB,basis_dim*colIdx) = Jb*D;
+        B.block<3,4>(3*objectIdxA,basis_dim*colIdx) = Ja*D;
+        B.block<3,4>(3*objectIdxB,basis_dim*colIdx) = Jb*D;
 
         // fill e matrix
         E.block<4,1>(basis_dim*colIdx,colIdx) = Vector4d(1,1,1,1);

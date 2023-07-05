@@ -10,7 +10,16 @@
 
 struct Settings
 {
-
+    // Haptic Settings
+    double scaleFactor = 1.;
+    double K = 1000; double B = 100;
+    // Simulation settings
+    double linearTolerance = 1e-6;
+    int numLinearIterations = 20;
+    double newtonTolerance = 1e-6;
+    int newtonIterations = 20;
+    double E = 1e10;
+    double nu = 0.5;
 };
 
 class RigidBodyDemo

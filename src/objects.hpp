@@ -33,9 +33,9 @@ public:
     }
 
     // the index
-    int m_idx;
+    int m_idx;  // auxiliary variable for global indexing
     double mass = 1.; // Mass.
-    ObjectType type;
+    ObjectType type; // the type of objects
     vector<Contact*> m_contacts; // the contacts involving this object
 
     //
@@ -76,9 +76,11 @@ public:
     void set_is_static(bool is_static_){is_static = is_static_;}
     MatrixXd kinematic_map_G();
     static MatrixXd kinematic_map_G(Quaterniond);
+    VectorXd generalized_pos();
+    VectorXd generalized_vel();
     MatrixXd kinematic_map_H();
-    MatrixXd mass_matrix();
-    MatrixXd inverse_mass_matrix();
+    MatrixXd generalized_mass();
+    MatrixXd generalized_mass_inverse();
     void update_inertia_matrix();
     void compute_inertia_matrix();
     void update_mesh_position();

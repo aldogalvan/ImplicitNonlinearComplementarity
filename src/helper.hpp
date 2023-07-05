@@ -6,6 +6,13 @@
 
 using namespace Eigen;
 
+inline bool is_ill_conditioned(const Eigen::MatrixXd& matrix, double threshold) {
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(matrix);
+    double condNumber = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size() - 1);
+    return condNumber > threshold;
+}
+
+
 inline double computeTetrahedronVolume(const Vector3d& vertex1, const Vector3d& vertex2, const Vector3d& vertex3, const Vector3d& vertex4)
 {
     // Calculate vectors representing three edges of the tetrahedron

@@ -46,7 +46,22 @@ MatrixXd RigidObject::kinematic_map_H()
     return G;
 }
 
-MatrixXd RigidObject::mass_matrix()
+VectorXd RigidObject::generalized_pos()
+{
+    q.normalize();
+    VectorXd ret;
+    ret.head(3) = x;
+}
+
+VectorXd RigidObject::generalized_vel()
+{
+    VectorXd u(6);
+    u.head(3) = xdot;
+    u.tail(3) = omega;
+    return u;
+}
+
+MatrixXd RigidObject::generalized_mass()
 {
     MatrixXd M(6,6); M.setZero();
     if (!is_static)
@@ -58,7 +73,7 @@ MatrixXd RigidObject::mass_matrix()
     return M;
 }
 
-MatrixXd RigidObject::inverse_mass_matrix()
+MatrixXd RigidObject::generalized_mass_inverse()
 {
     MatrixXd M_inv(6,6); M_inv.setZero();
     if (!is_static)
@@ -71,10 +86,14 @@ MatrixXd RigidObject::inverse_mass_matrix()
 
 void RigidObject::update_inertia_matrix()
 {
-    if( !is_static ){
+    if( !is_static )
+    {
         I = q * Ibody * q.inverse();
         Iinv = q * IbodyInv * q.inverse();}
-    else{Iinv.setZero();}
+    else
+    {
+        I.setZero();
+        Iinv.setZero();}
 }
 
 void RigidObject::compute_inertia_matrix()
@@ -128,19 +147,6 @@ void RigidObject::compute_inertia_matrix()
 
 void RigidObject::update_mesh_position()
 {
-
-    // Compute the transformed vertices
-//    MatrixXd transformedVertices = m_vertices;
-//    applyQuaternionRotation(transformedVertices,q);
-//    transformedVertices.rowwise() += x.transpose();
-//
-//    // Update the vertices in the cMultiMesh object
-//    cMesh* mesh = this->getMesh(0);
-//    for (int j = 0; j < mesh->getNumVertices(); ++j) {
-//        mesh->m_vertices->setLocalPos(j, cVector3d(transformedVertices(j, 0),
-//                                                   transformedVertices(j, 1),
-//                                                   transformedVertices(j, 2)));
-//    }
     this->setLocalPos(x); this->setLocalRot(q.toRotationMatrix());
 }
 
@@ -174,6 +180,11 @@ void RigidObject::import_mesh_data()
 
 }
 
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////// DEFORMABLE OBJECT /////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
 
 bool DeformableObject::create_tetrahedral_mesh(char* filename)
 {

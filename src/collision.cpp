@@ -50,7 +50,7 @@ Vector3d closestPointOnTriangle(const Vector3d& A, const Vector3d& B, const Vect
 void CollisionDetector::computeCollisions()
 {
     // delete the current contacts
-    for (auto c : m_contacts) {delete [] c;}
+    for (auto c : m_contacts) {delete c;}
     m_contacts.clear();
 
     // Nested loops to iterate through the vector
@@ -138,15 +138,17 @@ void CollisionDetector::computeCollisionsRigidRigid(RigidObject* object1, RigidO
                 m_contacts.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 m_contacts.back()->n = n1;
-                m_contacts.back()->bodyIdxA = object1->m_idx;
-                m_contacts.back()->bodyIdxB = object2->m_idx;
+                m_contacts.back()->objectIdxA = object1->m_idx;
+                m_contacts.back()->objectIdxB = object2->m_idx;
                 m_contacts.back()->depth = (v1 - a1).dot(n1);
 
                 // find the contacting point
                 Vector3d P = v1 - m_contacts.back()->depth * n1;
                 m_contacts.back()->contact_pt = P;
-                m_contacts.back()->contact_wrt_bodyA = refinePoint(v1,object1_pos_end,object1_rot_end);
-                m_contacts.back()->contact_wrt_bodyB = refinePoint(P,object2_pos_end,object2_rot_end);
+                m_contacts.back()->contact_wrt_objectA = refinePoint(v1,object1_pos_end,object1_rot_end);
+                m_contacts.back()->contact_wrt_objectB = refinePoint(P,object2_pos_end,object2_rot_end);
+                m_contacts.back()->compute_contact_basis();
+
             }
         }
     }
@@ -180,14 +182,15 @@ void CollisionDetector::computeCollisionsRigidRigid(RigidObject* object1, RigidO
                 m_contacts.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 m_contacts.back()->n = n1;
-                m_contacts.back()->bodyIdxA = object2->m_idx;
-                m_contacts.back()->bodyIdxB = object1->m_idx;
+                m_contacts.back()->objectIdxA = object2->m_idx;
+                m_contacts.back()->objectIdxB = object1->m_idx;
                 m_contacts.back()->depth = ((v1 - a1).dot(n1));
                 // find the contacting point
                 Vector3d P = v1 - m_contacts.back()->depth * n1;
                 m_contacts.back()->contact_pt = P;
-                m_contacts.back()->contact_wrt_bodyA = refinePoint(v1,object2_pos_end,object2_rot_end);
-                m_contacts.back()->contact_wrt_bodyB = refinePoint(P,object1_pos_end,object1_rot_end);
+                m_contacts.back()->contact_wrt_objectA = refinePoint(v1,object2_pos_end,object2_rot_end);
+                m_contacts.back()->contact_wrt_objectB = refinePoint(P,object1_pos_end,object1_rot_end);
+                m_contacts.back()->compute_contact_basis();
 
             }
         }
@@ -248,14 +251,15 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 collisions.back()->n = n1;
-                collisions.back()->bodyIdxA = 0;
-                collisions.back()->bodyIdxB = -1;
+                collisions.back()->objectIdxA = 0;
+                collisions.back()->objectIdxB = -1;
                 collisions.back()->depth = (v1 - a1).dot(n1);
                 // find the contacting point
                 Vector3d P = v1 - collisions.back()->depth * n1;
                 collisions.back()->contact_pt = P;
-                collisions.back()->contact_wrt_bodyA = v1 - object1_pos_end;
-                collisions.back()->contact_wrt_bodyB = P - object2_pos_end;
+                collisions.back()->contact_wrt_objectA = v1 - object1_pos_end;
+                collisions.back()->contact_wrt_objectB = P - object2_pos_end;
+                collisions.back()->compute_contact_basis();
                 flag = true;
             }
         }
@@ -285,14 +289,15 @@ bool CollisionDetector::findCollisions(const Vector3d& object1_pos_start, const 
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 collisions.back()->n = n1;
-                collisions.back()->bodyIdxA = -1;
-                collisions.back()->bodyIdxB = 0;
+                collisions.back()->objectIdxA = -1;
+                collisions.back()->objectIdxB = 0;
                 collisions.back()->depth = ((v1 - a1).dot(n1));
                 // find the contacting point
                 Vector3d P = v1 - collisions.back()->depth * n1;
                 collisions.back()->contact_pt = P;
-                collisions.back()->contact_wrt_bodyA = v1 - object2_pos_end;
-                collisions.back()->contact_wrt_bodyB = P - object1_pos_end;
+                collisions.back()->contact_wrt_objectA = v1 - object2_pos_end;
+                collisions.back()->contact_wrt_objectB = P - object1_pos_end;
+                collisions.back()->compute_contact_basis();
                 flag = true;
             }
         }
@@ -364,14 +369,14 @@ bool CollisionDetector::findCollisionsRigidRigid(const VectorXd& object1_start_p
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 collisions.back()->n = n1;
-                collisions.back()->bodyIdxA = 0;
-                collisions.back()->bodyIdxB = -1;
+                collisions.back()->objectIdxA = 0;
+                collisions.back()->objectIdxB = -1;
                 collisions.back()->depth = (v1 - a1).dot(n1);
                 // find the contacting point
                 Vector3d P = v1 - collisions.back()->depth * n1;
                 collisions.back()->contact_pt = P;
-                collisions.back()->contact_wrt_bodyA = refinePoint(v1,object1_pos_end,object1_rot_end);//v1 - object1_pos_end;
-                collisions.back()->contact_wrt_bodyB = refinePoint(P,object2_pos_end,object2_rot_end);//P - object2_pos_end;
+                collisions.back()->contact_wrt_objectA = refinePoint(v1,object1_pos_end,object1_rot_end);//v1 - object1_pos_end;
+                collisions.back()->contact_wrt_objectB = refinePoint(P,object2_pos_end,object2_rot_end);//P - object2_pos_end;
                 flag = true;
             }
         }
@@ -401,14 +406,14 @@ bool CollisionDetector::findCollisionsRigidRigid(const VectorXd& object1_start_p
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 collisions.back()->n = n1;
-                collisions.back()->bodyIdxA = -1;
-                collisions.back()->bodyIdxB = 0;
+                collisions.back()->objectIdxA = -1;
+                collisions.back()->objectIdxB = 0;
                 collisions.back()->depth = ((v1 - a1).dot(n1));
                 // find the contacting point
                 Vector3d P = v1 - collisions.back()->depth * n1;
                 collisions.back()->contact_pt = P;
-                collisions.back()->contact_wrt_bodyA = refinePoint(v1,object2_pos_end,object2_rot_end);//v1 - object2_pos_end;
-                collisions.back()->contact_wrt_bodyB = refinePoint(P,object1_pos_end,object1_rot_end);//P - object1_pos_end;
+                collisions.back()->contact_wrt_objectA = refinePoint(v1,object2_pos_end,object2_rot_end);//v1 - object2_pos_end;
+                collisions.back()->contact_wrt_objectB = refinePoint(P,object1_pos_end,object1_rot_end);//P - object1_pos_end;
                 flag = true;
             }
         }
@@ -462,8 +467,8 @@ bool CollisionDetector::findCollisionsDeformableDeformable(const VectorXd& objec
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 collisions.back()->n = n1;
-                collisions.back()->bodyIdxA = 0;
-                collisions.back()->bodyIdxB = -1;
+                collisions.back()->objectIdxA = 0;
+                collisions.back()->objectIdxB = -1;
                 collisions.back()->depth = (v1 - a1).dot(n1);
                 // find the contacting point
                 Vector3d P = v1 - collisions.back()->depth * n1;
@@ -497,8 +502,8 @@ bool CollisionDetector::findCollisionsDeformableDeformable(const VectorXd& objec
                 collisions.back()->t = t;
                 Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
                 collisions.back()->n = n1;
-                collisions.back()->bodyIdxA = -1;
-                collisions.back()->bodyIdxB = 0;
+                collisions.back()->objectIdxA = -1;
+                collisions.back()->objectIdxB = 0;
                 collisions.back()->depth = ((v1 - a1).dot(n1));
                 // find the contacting point
                 Vector3d P = v1 - collisions.back()->depth * n1;
