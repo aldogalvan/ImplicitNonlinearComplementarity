@@ -64,11 +64,9 @@ VectorXd RigidObject::generalized_vel()
 MatrixXd RigidObject::generalized_mass()
 {
     MatrixXd M(6,6); M.setZero();
-    if (!is_static)
-    {
-        M.block<3, 3>(0, 0) = mass * MatrixXd::Identity(3, 3);
-        M.block<3, 3>(3, 3) = I;
-    }
+    M.block<3, 3>(0, 0) = mass * MatrixXd::Identity(3, 3);
+    M.block<3, 3>(3, 3) = I;
+
 
     return M;
 }
@@ -76,24 +74,16 @@ MatrixXd RigidObject::generalized_mass()
 MatrixXd RigidObject::generalized_mass_inverse()
 {
     MatrixXd M_inv(6,6); M_inv.setZero();
-    if (!is_static)
-    {
-        M_inv.block<3, 3>(0, 0) = (1 / mass) * MatrixXd::Identity(3, 3);
-        M_inv.block<3, 3>(3, 3) = Iinv;
-    }
+    M_inv.block<3, 3>(0, 0) = (1 / mass) * MatrixXd::Identity(3, 3);
+    M_inv.block<3, 3>(3, 3) = Iinv;
+
     return M_inv;
 }
 
 void RigidObject::update_inertia_matrix()
 {
-    if( !is_static )
-    {
-        I = q * Ibody * q.inverse();
-        Iinv = q * IbodyInv * q.inverse();}
-    else
-    {
-        I.setZero();
-        Iinv.setZero();}
+    I = q * Ibody * q.inverse();
+    Iinv = q * IbodyInv * q.inverse();
 }
 
 void RigidObject::compute_inertia_matrix()

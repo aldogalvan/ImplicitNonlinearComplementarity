@@ -8,7 +8,7 @@
 void RigidBodyDemo::initialize()
 {
     // add balls to the scene
-    for (int i = 0 ; i < 4; i++)
+    for (int i = 0 ; i < 2; i++)
     {
         if (i == 0)
         {
@@ -16,19 +16,19 @@ void RigidBodyDemo::initialize()
             m_objects.back()->set_local_pos(Vector3d(0,sqrt(3)/4*0.55,0.0));
             m_objects.back()->getMesh(0)->m_material->setBlue();
         }
-        else if(i == 1)
-        {
-            m_objects.emplace_back(new RigidObject(i,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/model.obj"));
-            m_objects.back()->set_local_pos(Vector3d(-0.55/2,-sqrt(3)/4*0.55,0.0));
-            m_objects.back()->getMesh(0)->m_material->setRed();
-        }
-        else if (i == 2)
-        {
-            m_objects.emplace_back(new RigidObject(i,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/model.obj"));
-            m_objects.back()->set_local_pos(Vector3d(0.55/2,-sqrt(3)/4*0.55,0.0));
-            m_objects.back()->getMesh(0)->m_material->setYellow();
-        }
-        else if (i == 3)
+//        else if(i == 1)
+//        {
+//            m_objects.emplace_back(new RigidObject(i,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/model.obj"));
+//            m_objects.back()->set_local_pos(Vector3d(-0.55/2,-sqrt(3)/4*0.55,0.0));
+//            m_objects.back()->getMesh(0)->m_material->setRed();
+//        }
+//        else if (i == 2)
+//        {
+//            m_objects.emplace_back(new RigidObject(i,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/model.obj"));
+//            m_objects.back()->set_local_pos(Vector3d(0.55/2,-sqrt(3)/4*0.55,0.0));
+//            m_objects.back()->getMesh(0)->m_material->setYellow();
+//        }
+        else if (i == 1)
         {
             m_objects.emplace_back(new RigidObject(i,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/RigidBodyDemo/bowl.obj"));
             m_objects.back()->set_is_static(true);
@@ -51,7 +51,7 @@ void RigidBodyDemo::step(double dt)
     for(auto b : m_objects)
     {
         b->f = b->mass * Vector3d(0., 0, -0.0098);
-        b->tau.setZero();
+        b->tau = Vector3d(0,0,0);
         b->fc.setZero();
         b->tauc.setZero();
         b->m_contacts.clear();
@@ -70,13 +70,14 @@ void RigidBodyDemo::step(double dt)
     for(auto* b : m_objects)
     {
         b->x_last = b->x; b->q_last = b->q_last; b->xdot_last = b->xdot; b->omega_last = b->omega;
+        b->update_inertia_matrix();
         if( !b->is_static )
         {
             b->xdot += dt * (1./b->mass) * (b->f + b->fc);
             b->omega += dt * b->Iinv * (b->tau + b->tauc);
             b->x += dt * b->xdot;
             b->q = sumQuaternions(b->q,
-                                        multiplyQuaternionScalar(dt * 0.5 , Quaterniond(0, b->omega[0], b->omega[1], b->omega[2]) * b->q));
+                                        multiplyQuaternionScalar(dt * 0.5 , angularVelocityToQuaternion(b->omega) * b->q));
             b->q.normalize();
         }
         else
@@ -97,33 +98,29 @@ void RigidBodyDemo::updateGraphics()
 
 void RigidBodyDemo::computeConstraints(double dt)
 {
-    // get contacts
-    auto contacts = m_collisionDetector->m_contacts;
-    // get the number of objects
-    int num_objects = m_objects.size();
-    // get the number of contatcs
-    int num_contacts = contacts.size();
+    auto contacts = m_collisionDetector->m_contacts; // get contacts
+    int num_objects = m_objects.size(); // get the number of objects
+    int num_contacts = contacts.size(); // get the number of contatcs
 
-    VectorXd phi_normal(num_contacts); phi_normal.setZero();
-    VectorXd phi_friction(2 * num_contacts); phi_friction.setZero();
-    VectorXd lambda_normal(num_contacts); lambda_normal.setZero();
-    VectorXd lambda_friction(2 * num_contacts); lambda_friction.setZero();
-    VectorXd lambda(lambda_normal.size() + lambda_friction.size()); lambda.setZero();
-    MatrixXd J_normal(num_contacts, num_objects * 6); J_normal.setZero();
-    MatrixXd J_friction(2 * num_contacts, num_objects * 6); J_friction.setZero();
-    MatrixXd S(num_contacts, num_contacts); S.setZero();
-    MatrixXd W(2 * num_contacts, 2 * num_contacts); W.setZero();
-    VectorXi is_active(num_contacts); // determines if constraint is active or not
+    VectorXd phi_normal(num_contacts); phi_normal.setZero(); //  the normal constraint values
+    VectorXd phi_friction(2 * num_contacts); phi_friction.setZero(); //  the friction constraint values
+    VectorXd lambda_normal(num_contacts); lambda_normal.setZero(); //  the normal constraint force
+    VectorXd lambda_friction(2 * num_contacts); lambda_friction.setZero(); // the friction constraint force
+    VectorXd lambda(lambda_normal.size() + lambda_friction.size()); lambda.setZero(); // the generalized constraint vector
+    MatrixXd J_normal(num_contacts, num_objects * 6); J_normal.setZero(); //  the normal jacobian matrix
+    MatrixXd J_friction(2 * num_contacts, num_objects * 6); J_friction.setZero(); //  the friction jacobian
+    MatrixXd S(num_contacts, num_contacts); S.setZero(); //
+    MatrixXd W(2 * num_contacts, 2 * num_contacts); W.setZero(); //
 
-    VectorXd q(7 * num_objects); // the constrained position in global coordinates
-    VectorXd u(6 * num_objects); // the constrained velocity in generalized coordinates
+    VectorXd u(6 * num_objects); u.setZero() ; // the constrained velocity in generalized coordinates
     VectorXd u_tilde(6 * num_objects); // the unconstrained velocity
 
     // fill the unconstrained positions
-    for (int idx = 0 ; idx < num_objects; idx++)
+    for (auto b: m_objects)
     {
-        u_tilde.block<3,1>(6*idx,0) = m_objects[idx]->xdot;
-        u_tilde.block<3,1>(6*idx+3, 0) = m_objects[idx]->omega;
+        int bidx = b->m_idx;
+        u_tilde.block<3,1>(6*bidx,0) = b->xdot;
+        u_tilde.block<3,1>(6*bidx+3, 0) = b->omega;
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -132,14 +129,17 @@ void RigidBodyDemo::computeConstraints(double dt)
 
     for (int n = 0; n < m_settings.newtonIterations; n++)
     {
+        cout << "Newton It = " << n << endl;
         MatrixXd M_tilde(6*num_objects,6*num_objects); M_tilde.setZero();
         MatrixXd M_inv_tilde(6*num_objects,6*num_objects); M_inv_tilde.setZero();
-        for (int idx = 0; idx < num_objects; idx++)
+
+        for (auto b : m_objects)
         {
-            m_objects[idx]->update_inertia_matrix();
-            M_tilde.block<6,6>(6*idx,6*idx) = m_objects[idx]->generalized_mass();
-            M_inv_tilde.block<6,6>(6*idx,6*idx) = m_objects[idx]->generalized_mass_inverse();
-            u.block<6,1>(6*idx,0) = m_objects[idx]->generalized_vel();
+            int bidx = b->m_idx;
+            b->update_inertia_matrix();
+            M_tilde.block<6,6>(6*bidx,6*bidx) = b->generalized_mass();
+            M_inv_tilde.block<6,6>(6*bidx,6*bidx) = b->generalized_mass_inverse();
+//            u.block<6,1>(6*bidx,0) = b->generalized_vel();
         }
 
         for (int cidx = 0; cidx < num_contacts; cidx++) {
@@ -238,14 +238,14 @@ void RigidBodyDemo::computeConstraints(double dt)
         assert(!b.hasNaN());
 
         // zero out any inactive contacts
-        for (int contact = 0; contact < num_contacts; contact++)
+        for (int cidx = 0; cidx < num_contacts; cidx++)
         {
-            if (is_active[contact] == 0 )
+            if (m_collisionDetector->m_contacts[cidx]->is_active() == 0 )
             {
-                A.row(num_contacts + 2*contact) = RowVectorXd::Zero(A.cols());
-                A.row(num_contacts + 2*contact + 1) = RowVectorXd::Zero(A.cols());
-                b(num_contacts + 2*contact) = 0;
-                b(num_contacts + 2*contact + 1) = 0;
+                A.row(num_contacts + 2*cidx) = RowVectorXd::Zero(A.cols());
+                A.row(num_contacts + 2*cidx + 1) = RowVectorXd::Zero(A.cols());
+                b(num_contacts + 2*cidx) = 0;
+                b(num_contacts + 2*cidx + 1) = 0;
             }
         }
 
@@ -254,6 +254,7 @@ void RigidBodyDemo::computeConstraints(double dt)
 
         assert(!delta_lambda.hasNaN());
         auto delta_u = H_inv*(J.transpose()*delta_lambda*dt - g);
+        cout << "g = " << g.transpose() << endl;
         assert(!delta_u.hasNaN());
         // perform a line search
         int t = 0.5;
@@ -261,17 +262,30 @@ void RigidBodyDemo::computeConstraints(double dt)
         // update solution
         lambda += t*delta_lambda;
         u += t*delta_u;
-        for (int bidx = 0 ; bidx < m_objects.size(); bidx++)
+
+        cout << "Delta Lambda : " << endl << delta_lambda.transpose() << endl;
+        cout << "Delta U : " << endl << delta_u.transpose() << endl;
+
+        for (auto b : m_objects)
         {
-            q.block<7,1>(bidx*7,0) += dt*m_objects[bidx]->kinematic_map_G()*u.block<7,1>(bidx*7,0);
-            m_objects[bidx]->x = q.block<3,1>(bidx*7,0); m_objects[bidx]->q = q.block<4,1>(bidx*7+3,0);
-            m_objects[bidx]->xdot = u.block<3,1>(bidx*6,0); m_objects[bidx]->omega = q.block<3,1>(bidx*6+3,0);
+            if (!b->is_static) {
+                int bidx = b->m_idx;
+                b->xdot = u.block<3,1>(6*bidx,0);
+                b->omega = u.block<3,1>(6*bidx + 3,0);
+                b->x += dt * b->xdot;
+                b->q = sumQuaternions(b->q,
+                                      multiplyQuaternionScalar(dt * 0.5 , angularVelocityToQuaternion(b->omega) * b->q));
+                b->q.normalize();
+            }
+            else
+            {
+                b->xdot.setZero();
+                b->omega.setZero();
+            }
         }
 
         // set the constraint forces
         lambda_normal = lambda.block(0,0,lambda_normal.size(),1);
         lambda_friction = lambda.block(lambda_normal.size(),0,lambda_friction.size(),1);
-
-
     }
 }

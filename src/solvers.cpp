@@ -4,12 +4,6 @@
 using namespace Eigen;
 using namespace std;
 
-inline bool is_ill_conditioned(const Eigen::MatrixXd& matrix, double threshold) {
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(matrix);
-    double condNumber = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size() - 1);
-    return condNumber > threshold;
-}
-
 inline VectorXd gauss_seidel(const MatrixXd& A, const VectorXd& b, VectorXd& lambda, double tol = 1e-6, int max_iter = 10) {
     int n = A.rows();
     lambda = VectorXd::Zero(n);

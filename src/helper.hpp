@@ -6,8 +6,19 @@
 
 using namespace Eigen;
 
-inline bool is_ill_conditioned(const Eigen::MatrixXd& matrix, double threshold) {
-    Eigen::JacobiSVD<Eigen::MatrixXd> svd(matrix);
+//! A bunch of useful functions
+
+inline Quaterniond angularVelocityToQuaternion(const Vector3d& angular_velocity)
+{
+    Quaterniond angular_velocity_quaternion;
+    angular_velocity_quaternion.w() = 0.0;
+    angular_velocity_quaternion.vec() = angular_velocity;
+
+    return angular_velocity_quaternion;
+}
+
+inline bool is_ill_conditioned(const MatrixXd& matrix, double threshold) {
+    JacobiSVD<MatrixXd> svd(matrix);
     double condNumber = svd.singularValues()(0) / svd.singularValues()(svd.singularValues().size() - 1);
     return condNumber > threshold;
 }
@@ -26,48 +37,48 @@ inline double computeTetrahedronVolume(const Vector3d& vertex1, const Vector3d& 
     return std::abs(volume);
 }
 
-inline Eigen::Quaterniond generateQuaternion(double rotation_x_deg, double rotation_y_deg, double rotation_z_deg)
+inline Quaterniond generateQuaternion(double rotation_x_deg, double rotation_y_deg, double rotation_z_deg)
 {
     double rotation_x_rad = rotation_x_deg * M_PI / 180.0; // Convert degrees to radians
     double rotation_y_rad = rotation_y_deg * M_PI / 180.0;
     double rotation_z_rad = rotation_z_deg * M_PI / 180.0;
 
-    Eigen::AngleAxisd rot_x(rotation_x_rad, Eigen::Vector3d::UnitX());
-    Eigen::AngleAxisd rot_y(rotation_y_rad, Eigen::Vector3d::UnitY());
-    Eigen::AngleAxisd rot_z(rotation_z_rad, Eigen::Vector3d::UnitZ());
+    AngleAxisd rot_x(rotation_x_rad, Vector3d::UnitX());
+    AngleAxisd rot_y(rotation_y_rad, Vector3d::UnitY());
+    AngleAxisd rot_z(rotation_z_rad, Vector3d::UnitZ());
 
-    Eigen::Quaterniond quaternion = rot_z * rot_y * rot_x;
+    Quaterniond quaternion = rot_z * rot_y * rot_x;
 
     return quaternion;
 }
 
-inline Eigen::Quaterniond multiplyQuaternionScalar( double scalar,const Eigen::Quaterniond& q)
+inline Quaterniond multiplyQuaternionScalar( double scalar,const Quaterniond& q)
 {
-    Eigen::Quaterniond result;
+    Quaterniond result;
     result.coeffs() = q.coeffs() * scalar;
     return result;
 }
 
 
-inline Eigen::Quaterniond sumQuaternions(const Eigen::Quaterniond& q1, const Eigen::Quaterniond& q2)
+inline Quaterniond sumQuaternions(const Quaterniond& q1, const Quaterniond& q2)
 {
-    Eigen::Quaterniond sum;
+    Quaterniond sum;
     sum.coeffs() = q1.coeffs() + q2.coeffs();
     return sum;
 }
 
 
-inline Vector3d checkNearZero(const Eigen::Vector3d& vector) {
+inline Vector3d checkNearZero(const Vector3d& vector) {
     double threshold = 1e-6;
 
     if (vector.norm() < threshold) {
-        return Eigen::Vector3d::Zero();
+        return Vector3d::Zero();
     } else {
         return vector;
     }
 }
 
-inline void cutoff_negative_values(Eigen::VectorXd& v) {
+inline void cutoff_negative_values(VectorXd& v) {
     for (int i = 0; i < v.size(); i++) {
         if (v(i) < 0) {
             v(i) = 0;
@@ -75,16 +86,16 @@ inline void cutoff_negative_values(Eigen::VectorXd& v) {
     }
 }
 
-inline Eigen::MatrixXd vec2skew(const Eigen::Vector3d& vec)
+inline MatrixXd vec2skew(const Vector3d& vec)
 {
-    Eigen::MatrixXd skew(3, 3);
+    MatrixXd skew(3, 3);
     skew <<  0, -vec.z(), vec.y(),
             vec.z(), 0, -vec.x(),
             -vec.y(), vec.x(), 0;
     return skew;
 }
 
-inline void applyQuaternionRotation(Eigen::MatrixXd& vertices, const Eigen::Quaterniond& rotation)
+inline void applyQuaternionRotation(MatrixXd& vertices, const Quaterniond& rotation)
 {
     // Get the number of vertices and the dimensionality of each vertex
     const int numVertices = vertices.rows();
@@ -94,7 +105,7 @@ inline void applyQuaternionRotation(Eigen::MatrixXd& vertices, const Eigen::Quat
     for (int i = 0; i < numVertices; ++i)
     {
         // Extract the vertex coordinates
-        Eigen::Vector3d vertex = vertices.row(i).head<3>();
+        Vector3d vertex = vertices.row(i).head<3>();
 
         // Apply the rotation to the vertex coordinates
         vertex = rotation * vertex;

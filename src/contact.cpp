@@ -131,6 +131,9 @@ void Contact::compute_constraints(double r_n, double r_f, double lambda_n, Vecto
     // the constraint value
     double C_n = penetration_depth;
 
+//    cout << "C_n = " << C_n << endl;
+//    cout << "normal = " << normal.transpose() << endl;
+
     //
     // gradients of the constraint for normal
     VectorXd grad_C_n_A(6); grad_C_n_A.head(3) = normal; grad_C_n_A.tail(3) = vec2skew(-normal).transpose()*contact_wrt_objectA;
@@ -141,8 +144,10 @@ void Contact::compute_constraints(double r_n, double r_f, double lambda_n, Vecto
 
     double d_fischer_d_a = fischer_partial_a(C_n, r_n * lambda_n);
     J_n_A = (d_fischer_d_a * grad_C_n_A).transpose();
+//    cout << "J_n_A = " << J_n_A << endl;
     assert(!J_n_A.hasNaN());
     J_n_B = (d_fischer_d_a* grad_C_n_B).transpose();
+//    cout << "J_n_B = " << J_n_B << endl;
     assert(!J_n_B.hasNaN());
     phi_n_wrt_lambda_n = fischer_partial_b(C_n, r_n * lambda_n) * r_n;
     assert(!isnan(phi_n_wrt_lambda_n));
