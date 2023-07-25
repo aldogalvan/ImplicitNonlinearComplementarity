@@ -38,6 +38,7 @@ void RigidBodyDemo::initialize()
         }
         m_world->addChild(m_objects.back());
         m_objects.back()->import_mesh_data();
+        m_objects.back()->compute_inertia_matrix();
     }
 
     // create the collision detector
@@ -46,7 +47,6 @@ void RigidBodyDemo::initialize()
 
 void RigidBodyDemo::step(double dt)
 {
-
     // reset forces
     for(auto b : m_objects)
     {

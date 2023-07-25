@@ -3,8 +3,6 @@
 #include <iostream>
 #include "helper.hpp"
 
-
-
 inline Vector3d refinePoint(const Vector3d& p, const Vector3d& objectPosition, const Quaterniond& objectRotation)
 {
     // Create the object's transformation matrix

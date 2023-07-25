@@ -38,7 +38,7 @@ include_directories(include/imgui)
 include_directories(include/imgui/backends)
 include_directories(src)
 
-file(GLOB_RECURSE IMPLICIT_LCP_SOURCES  src/*.cpp src/*.h external/tetgen/*.cpp external/tetgen/*.h)
+file(GLOB_RECURSE IMPLICIT_LCP_SOURCES  src/*.cpp src/*.hpp external/tetgen/*.cpp external/tetgen/*.h)
 add_library(ImplicitLCP ${IMPLICIT_LCP_SOURCES})
 add_definitions(-DTETLIBRARY)
 
@@ -49,15 +49,10 @@ target_link_libraries(ImplicitLCP PUBLIC
         Eigen3::Eigen
         drake::drake)
 
-#add_executable(RigidBodiesDemo rigid_bodies_demo.cpp)
-#add_executable(HapticsDemoQuasistatic haptics_demo_quasistatic.cpp)
-#add_executable(HapticsDemo haptics_demo.cpp)
-#add_executable(HapticsDemoRigid haptics_demo_rigid.cpp)
-#add_executable(HapticsDemoDeformable haptics_demo_deformable.cpp)
+
 add_executable(PegInHole simulations/PegInHole/main.cpp simulations/PegInHole/PegInHole.cpp)
 add_executable(RigidBodyDemo simulations/RigidBodyDemo/main.cpp simulations/RigidBodyDemo/RigidBodyDemo.cpp)
-
-
+add_executable(DeformableBodyDemo simulations/DeformableBodyDemo/main.cpp simulations/DeformableBodyDemo/DeformableBodyDemo.cpp)
 
 #target_link_libraries(RigidBodiesDemo PUBLIC
 #        ImplicitLCP)
@@ -67,6 +62,7 @@ add_executable(RigidBodyDemo simulations/RigidBodyDemo/main.cpp simulations/Rigi
 #target_link_libraries(HapticsDemoDeformable PUBLIC ImplicitLCP)
 target_link_libraries(PegInHole PUBLIC ImplicitLCP)
 target_link_libraries(RigidBodyDemo PUBLIC ImplicitLCP)
+target_link_libraries(DeformableBodyDemo PUBLIC ImplicitLCP)
 
 
 add_subdirectory(simulations/PegInHoleQt)

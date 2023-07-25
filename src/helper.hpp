@@ -7,6 +7,65 @@
 using namespace Eigen;
 
 //! A bunch of useful functions
+inline Eigen::VectorXd createGravityVector(int numVertices) {
+    // Calculate the total size of the resulting vector
+    int totalSize = 3 * numVertices;
+
+    // Create a vector with all elements set to zero
+    Eigen::VectorXd gravityVector = Eigen::VectorXd::Zero(totalSize);
+
+    // Set the gravity component (-9.8) in the z-direction (every third element)
+    for (int i = 2; i < totalSize; i += 3) {
+        gravityVector[i] = -9.8;
+    }
+
+    return gravityVector;
+}
+
+inline VectorXd flattenMatrix(const Eigen::MatrixXd& matrix) {
+    // Get the number of vertices and dimensions
+    int numVertices = matrix.rows();
+    int numDimensions = matrix.cols();
+
+    // Create a vector with the appropriate size
+    Eigen::VectorXd flattenedVector(numVertices * numDimensions);
+
+    // Flatten the matrix into the vector
+    for (int i = 0; i < numVertices; ++i) {
+        for (int j = 0; j < numDimensions; ++j) {
+            flattenedVector[i * numDimensions + j] = matrix(i, j);
+        }
+    }
+
+    return flattenedVector;
+}
+
+inline VectorXd flatten(const Matrix3d &A) {
+    VectorXd flattened(9);
+    int index = 0;
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x < 3; x++, index++) {
+            flattened[index] = A(x, y);
+        }
+    }
+    return flattened;
+}
+
+inline VectorXd strainTensorToVector(const Matrix3d& strainTensor) {
+    // Extract the components of the symmetric strain tensor
+    double epsilon_xx = strainTensor(0, 0);
+    double epsilon_yy = strainTensor(1, 1);
+    double epsilon_zz = strainTensor(2, 2);
+    double epsilon_xy = strainTensor(0, 1);
+    double epsilon_xz = strainTensor(0, 2);
+    double epsilon_yz = strainTensor(1, 2);
+
+    // Create the 6-dimensional strain vector
+    VectorXd strainVector(6);
+    strainVector << epsilon_xx, epsilon_yy, epsilon_zz, 2.0 * epsilon_xy, 2.0 * epsilon_xz, 2.0 * epsilon_yz;
+
+    return strainVector;
+}
 
 inline Quaterniond angularVelocityToQuaternion(const Vector3d& angular_velocity)
 {

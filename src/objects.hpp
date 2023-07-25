@@ -5,6 +5,7 @@
 #include <vector>
 #include "chai3d.h"
 #include "helper.hpp"
+#include "constraints.hpp"
 
 using namespace chai3d;
 using namespace Eigen;
@@ -27,10 +28,12 @@ public:
     virtual void timestep(double dt){}
     virtual void set_local_pos(Vector3d pos){}
     virtual void set_local_rot(Quaterniond rot){}
+    void import_mesh_data();
     void scale(double s)
     {
         m_vertices *= s; this->getMesh(0)->scale(s);
     }
+    void set_is_static(bool is_static_){is_static = is_static_;}
 
     // the index
     int m_idx;  // auxiliary variable for global indexing
@@ -38,11 +41,10 @@ public:
     ObjectType type; // the type of objects
     vector<Contact*> m_contacts; // the contacts involving this object
 
-    //
     MatrixXi m_triangles; //  the triangles representing this object
     MatrixXd m_vertices; // the vertices of this object in the zero configuration
     MatrixXd m_normals; //  the normals for this object
-
+    bool is_static = false; // is this object static
 };
 
 class RigidObject : public Object
@@ -73,7 +75,6 @@ public:
     virtual void set_local_rot(Quaterniond rot) override;
     const MatrixXd& vertices(void){return m_vertices;}
     const MatrixXi& triangles(void){return m_triangles;}
-    void set_is_static(bool is_static_){is_static = is_static_;}
     MatrixXd kinematic_map_G();
     static MatrixXd kinematic_map_G(Quaterniond);
     VectorXd generalized_pos();
@@ -84,27 +85,24 @@ public:
     void update_inertia_matrix();
     void compute_inertia_matrix();
     void update_mesh_position();
-    void import_mesh_data();
 
-    Eigen::Matrix3d I, Iinv;            // Inertia and inverse inertia matrix (global)
-    Eigen::Matrix3d Ibody, IbodyInv;    // Inertia and inverse inertia in the local body frame.
-    Eigen::Vector3d x;                  // Position.
-    Eigen::Vector3d x_last;             // Last position.
-    Eigen::Quaterniond q;               // Rotation
-    Eigen::Quaterniond q_last;          // Last rotation.
+    Matrix3d I, Iinv;            // Inertia and inverse inertia matrix (global)
+    Matrix3d Ibody, IbodyInv;    // Inertia and inverse inertia in the local body frame.
+    Vector3d x;                  // Position.
+    Vector3d x_last;             // Last position.
+    Quaterniond q;               // Rotation
+    Quaterniond q_last;          // Last rotation.
 
-    Eigen::Matrix3d R;                  // Rotation matrix (auxiliary).
-    Eigen::Vector3d xdot;               // Linear velocity.
-    Eigen::Vector3d xdot_last;          // Last velocity.
-    Eigen::Vector3d omega;              // Angular velocity.
-    Eigen::Vector3d omega_last;         // Last angular velocity.
-    Eigen::Vector3d f;                  // Linear force.
-    Eigen::Vector3d tau;                // Angular force (torque).
+    Matrix3d R;                  // Rotation matrix (auxiliary).
+    Vector3d xdot;               // Linear velocity.
+    Vector3d xdot_last;          // Last velocity.
+    Vector3d omega;              // Angular velocity.
+    Vector3d omega_last;         // Last angular velocity.
+    Vector3d f;                  // Linear force.
+    Vector3d tau;                // Angular force (torque).
 
-    Eigen::Vector3d fc;                 // Linear constraint force.
-    Eigen::Vector3d tauc;               // Angular constraint force
-
-    bool is_static = false;
+    Vector3d fc;                 // Linear constraint force.
+    Vector3d tauc;               // Angular constraint force
 };
 
 class DeformableObject : public Object
@@ -113,7 +111,6 @@ public:
 
     DeformableObject(int idx = -1, const std::string& meshFilename = "") : Object(idx)
     {
-        set_material_stiffness_matrix(9e9,0.5);
         char* filenamePtr = const_cast<char*>(meshFilename.c_str());
         create_tetrahedral_mesh(filenamePtr);
         type = DEFORMABLE;
@@ -123,34 +120,30 @@ public:
     const MatrixXd& vertices(void){return m_vertices;}
     const MatrixXi& tetrahedra(void){return m_tetrahedra;}
     const MatrixXi& triangles(void){return m_triangles;}
-    void timestep(double dt)
-    {
-
-    }
-    void set_material_stiffness_matrix(double,double);
     bool create_tetrahedral_mesh(char* filename);
-    void compute_rest_volumes(void);
-    void compute_rest_deformation_gradient(void);
-    void compute_elasticity_matrix(void);
     void update_mesh_position(void);
     MatrixXd mass_matrix();
     MatrixXd inverse_mass_matrix();
 
-    //
-    int m_numVerts;
-    int m_numTets;
+    int m_numVerts;             // the number of vertices
+    int m_numTets;              // the number of tetrahedra
 
-    //
-    MatrixXd K; // the material stiffness matrix
-    MatrixXd E; // the elasticity matrix
-    VectorXd volume_0;
-    MatrixXd gradient_0;
+    VectorXd x;                  // Node positions.
+    VectorXd x_last;             // Last positions.
 
-    //
-    MatrixXi m_tetrahedra;
+    VectorXd xdot;               // Linear velocities.
+    VectorXd xdot_last;          // Last velocities.
+    VectorXd f;                  // External force.
+    VectorXd fc;                 // Linear constraint force.
+    MatrixXi m_tetrahedra;       // The tetrahedra
+
+    vector<FixedConstraint*> fixed_constraints; // the fixed point constraints
+    vector<LinearHookeanConstraint*> linear_hookean_constraints; //  the linear constraints
+    vector<LinearCorotationalConstraint*> corotational_constraints; // the corotational constraints
 
 };
 
+// these are the haptic objects
 class GodObject : public RigidObject
 {
 public:

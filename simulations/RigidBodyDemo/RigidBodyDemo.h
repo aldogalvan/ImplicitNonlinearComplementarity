@@ -46,8 +46,6 @@ public:
     vector<RigidObject*> m_objects;
     Settings m_settings;
     CollisionDetector* m_collisionDetector;
-
-
 };
 
 #endif //IMPLICITNONLINEARCOMPLEMENTARITY_RIGIDBODYDEMO_H
