@@ -19,7 +19,7 @@ struct Settings
     double linearTolerance = 1e-6;
     int numLinearIterations = 20;
     double newtonTolerance = 1e-6;
-    int newtonIterations = 20;
+    int newtonIterations = 10;
     double E = 1e10;
     double nu = 0.5;
 };

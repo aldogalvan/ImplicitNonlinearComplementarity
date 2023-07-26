@@ -29,17 +29,19 @@ Matrix<double, 9, 12> computedFdx(const Eigen::Matrix3d& DmInv) {
 ////////////////////// THE FIXED CONSTRAINT //////////////////////////
 //////////////////////////////////////////////////////////////////////
 
-void FixedConstraint::computeJacobian(Eigen::MatrixXd &x)
+VectorXd FixedConstraint::computeJacobian(VectorXd &x)
 {
     J.resize(3,1);
-    auto p = x.row(v0).transpose();
+    auto p = x.block<3,1>(3*v0,0);
     J = (p0 - p).normalized();
+    return J;
 }
 
-void FixedConstraint::compute_Cb(Eigen::MatrixXd &x)
+double FixedConstraint::compute_Cb(VectorXd &x)
 {
-    auto p = x.row(v0).transpose();
+    auto p = x.block<3,1>(3*v0,0);
     Cb = (p0 - p).norm();
+    return Cb;
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -77,7 +79,7 @@ void LinearHookeanConstraint::compute_Dm(VectorXd& x)
 
 MatrixXd LinearHookeanConstraint::compute_F(VectorXd& x)
 {
-    MatrixXd F(3,3); F.setZero();
+    MatrixXd F = Matrix3d::Zero();
     Matrix3d Ds;
 
     Vector3d p0 = x.block<3,1>(v0*3,0);

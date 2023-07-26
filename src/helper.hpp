@@ -16,7 +16,7 @@ inline Eigen::VectorXd createGravityVector(int numVertices) {
 
     // Set the gravity component (-9.8) in the z-direction (every third element)
     for (int i = 2; i < totalSize; i += 3) {
-        gravityVector[i] = -9.8;
+        gravityVector[i] = -0.98;
     }
 
     return gravityVector;

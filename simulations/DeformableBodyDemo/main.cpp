@@ -545,7 +545,7 @@ void updateSimulation(void) {
         clock.start(true);
 
         // steps the simulation by dt
-        sim->step(dt);
+        sim->step(0.1);
 
         // update frequency counter
         freqCounterSimulation.signal(1);

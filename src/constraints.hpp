@@ -1,7 +1,9 @@
 #include <Eigen/Dense>
 #include "helper.hpp"
+#include <iostream>
 
 using namespace Eigen;
+using namespace std;
 
 class FixedConstraint
 {
@@ -13,9 +15,9 @@ public:
         p0 = p0_;
     }
 
-    void updateConstraint(MatrixXd& x);
-    void computeJacobian(MatrixXd& x); // computes the jacobian wrt to vertex
-    void compute_Cb(MatrixXd& x);
+    void updateConstraint(VectorXd& u);
+    VectorXd computeJacobian(VectorXd& u); // computes the jacobian wrt to vertex
+    double compute_Cb(VectorXd& x);
 
     int v0; // the vertex this constraint acts on
     Vector3d p0; // the fixed point position

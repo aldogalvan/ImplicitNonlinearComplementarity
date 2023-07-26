@@ -98,25 +98,30 @@ void DeformableBodyDemo::computeConstraints(double dt)
     auto contacts = m_collisionDetector->m_contacts; // get contacts
     int num_objects = m_objects.size(); // get the number of objects
     int num_contacts = contacts.size(); // get the number of contatcs
-    int num_bilateral_constraints = 0;
+    int num_soft_constraints = 0;
+    int num_hard_constraints = 0;
     int num_elements = 0;
     for (auto obj : m_objects)
     {
-        num_bilateral_constraints += obj->m_numTets;
+        num_soft_constraints += 9*obj->linear_hookean_constraints.size();
+        num_hard_constraints += obj->fixed_constraints.size();
         num_elements += obj->m_numVerts;
     }
 
+    cout << "Num Soft Constraints = " << num_soft_constraints << endl;
+    cout << "Num Hard Constraints = " << num_hard_constraints << endl;
+
     VectorXd phi_normal(num_contacts); phi_normal.setZero(); //  the normal constraint values
     VectorXd phi_friction(2 * num_contacts); phi_friction.setZero(); //  the friction constraint values
-    VectorXd h_bilateral(9 * num_bilateral_constraints); h_bilateral.setZero(); // the bilateral constraint value
+    VectorXd h_bilateral(num_soft_constraints + num_hard_constraints); h_bilateral.setZero(); // the bilateral constraint value
     VectorXd lambda_normal(num_contacts); lambda_normal.setZero(); //  the normal constraint force
     VectorXd lambda_friction(2 * num_contacts); lambda_friction.setZero(); // the friction constraint force
-    VectorXd lambda_bilateral(9 * num_bilateral_constraints); lambda_bilateral.setZero(); // the bilateral constraint force
+    VectorXd lambda_bilateral(num_soft_constraints + num_hard_constraints); lambda_bilateral.setZero(); // the bilateral constraint force
     VectorXd lambda(lambda_bilateral.size() + lambda_normal.size() + lambda_friction.size()); lambda.setZero(); // the generalized constraint vector
     MatrixXd J_normal(num_contacts, num_elements * 3); J_normal.setZero(); // the normal jacobian matrix
     MatrixXd J_friction(2 * num_contacts, num_elements * 3); J_friction.setZero(); // the friction jacobian
-    MatrixXd J_bilateral(9 * num_bilateral_constraints ,num_elements * 3); J_bilateral.setZero(); // the bilateral jacobian
-    MatrixXd E(9*num_bilateral_constraints, 9*num_bilateral_constraints); E.setZero(); // the compliance matrix
+    MatrixXd J_bilateral(num_soft_constraints + num_hard_constraints ,num_elements * 3); J_bilateral.setZero(); // the bilateral jacobian
+    MatrixXd E(num_soft_constraints + num_hard_constraints, num_soft_constraints + num_hard_constraints); E.setZero(); // the compliance matrix
     MatrixXd S(num_contacts, num_contacts); S.setZero(); // the normal compliance
     MatrixXd W(2 * num_contacts, 2 * num_contacts); W.setZero(); // the friction compliance
 
@@ -133,6 +138,8 @@ void DeformableBodyDemo::computeConstraints(double dt)
         u_tilde.block(idxctr,0,3*b->m_numVerts,1) = b->xdot;
         idxctr += 3*b->m_numVerts;
     }
+
+    cout << "DEBUG: utilde = " << u_tilde.transpose() << endl;
 
     ////////////////////////////////////////////////////////////////////////
     ////////////////// START THE NEWTON ITERATIONS ////////////////////////
@@ -214,25 +221,30 @@ void DeformableBodyDemo::computeConstraints(double dt)
                         J_bilateral.block<1, 3>(9 * tidx + i,3 * vidx[j]) = J_b.block<1,3>( i,3 * j);
                     }
                 }
-
             }
         }
-
-        cout << "Milestone " << endl;
-
         ////////////////////////////////////////////////////////////////////////////////////
         ///////////////////// THE HARD KINEMATIC CONSTRAINTS //////////////////////////////
         ///////////////////////////////////////////////////////////////////////////////////
 
+        int ctr = num_soft_constraints;
         for (auto obj : m_objects)
         {
+            cout << ctr << endl;
             if (obj->type != DEFORMABLE) continue;
             auto& x = obj->x;
             for (auto c : obj->fixed_constraints)
             {
+                int vidx = c->v0;
+                h_bilateral(ctr) = c->compute_Cb(x);
 
+                J_bilateral.block<1, 3>(ctr, 3 * vidx) = c->computeJacobian(x);
+//                E(ctr,ctr) = 1.;
+                ctr++;
             }
         }
+
+        cout << "Finished" << endl;
 
         assert(!J_friction.hasNaN());
         assert(!J_normal.hasNaN());
@@ -312,6 +324,7 @@ void DeformableBodyDemo::computeConstraints(double dt)
         // update solution
         lambda += t*delta_lambda;
         u += t*delta_u;
+        cout << "DEBUG: delta_u = " << delta_u.transpose() << endl;
 
         for (auto b : m_objects)
         {
