@@ -19,20 +19,19 @@ class Object : public cMultiMesh
 {
 public:
 
-    Object(int idx = -1)
+    Object(int idx = -1, const std::string& meshFilename = "")
     {
         m_idx = idx;
+        loadMesh(meshFilename);
     }
     ~Object() = default;
 
     virtual void timestep(double dt){}
+    void loadMesh(const std::string& filename);
     virtual void set_local_pos(Vector3d pos){}
     virtual void set_local_rot(Quaterniond rot){}
-    void import_mesh_data();
-    void scale(double s)
-    {
-        m_vertices *= s; this->getMesh(0)->scale(s);
-    }
+    void initializeVisualizer();
+    void scaleMesh(const double s);
     void set_is_static(bool is_static_){is_static = is_static_;}
 
     // the index
@@ -52,25 +51,14 @@ class RigidObject : public Object
 
 public:
 
-    RigidObject(int idx = -1, const std::string& meshFilename = "") : Object(idx)
+    RigidObject(int idx = -1, const std::string& meshFilename = "") : Object(idx,meshFilename)
     {
-        if (!this->loadFromFile(meshFilename))
-        {
-            cout << "COULD NOT LOAD MESH FILE" << endl;
-        }
-        x.setZero();
-        x_last.setZero();
-        q = Quaterniond::Identity();
-        q_last = Quaterniond ::Identity();
-        xdot.setZero();
-        xdot_last.setZero();
-        omega.setZero();
-        omega_last.setZero();
-        Ibody.setIdentity();
-        IbodyInv.setIdentity();
         type = RIGID;
     }
 
+    MatrixXd M(void){return mass*Matrix3d::Identity();}
+    VectorXd get_configuration(void);
+    VectorXd get_configuration_unconstrained(void);
     virtual void set_local_pos(Vector3d pos) override;
     virtual void set_local_rot(Quaterniond rot) override;
     const MatrixXd& vertices(void){return m_vertices;}
@@ -86,30 +74,30 @@ public:
     void compute_inertia_matrix();
     void update_mesh_position();
 
-    Matrix3d I, Iinv;            // Inertia and inverse inertia matrix (global)
-    Matrix3d Ibody, IbodyInv;    // Inertia and inverse inertia in the local body frame.
-    Vector3d x;                  // Position.
-    Vector3d x_last;             // Last position.
-    Quaterniond q;               // Rotation
-    Quaterniond q_last;          // Last rotation.
+    Matrix3d I, Iinv = Matrix3d::Identity(); // Inertia and inverse inertia matrix (global)
+    Matrix3d Ibody, IbodyInv = Matrix3d::Identity(); // Inertia and inverse inertia in the local body frame.
+    Vector3d x = Vector3d::Zero(); // Position.
+    Vector3d x_tilde = Vector3d::Zero(); // Unconstrained Position
+    Quaterniond q = Quaterniond::Identity(); // Rotation
+    Quaterniond q_tilde = Quaterniond::Identity(); // Unconstrained rotation.
 
-    Matrix3d R;                  // Rotation matrix (auxiliary).
-    Vector3d xdot;               // Linear velocity.
-    Vector3d xdot_last;          // Last velocity.
-    Vector3d omega;              // Angular velocity.
-    Vector3d omega_last;         // Last angular velocity.
-    Vector3d f;                  // Linear force.
-    Vector3d tau;                // Angular force (torque).
+    Matrix3d R = Matrix3d::Identity(); // Rotation matrix (auxiliary).
+    Vector3d xdot = Vector3d::Zero(); // Linear velocity.
+    Vector3d xdot_tilde = Vector3d::Zero(); // Unconstrained linear velocity
+    Vector3d omega = Vector3d::Zero(); // Angular velocity.
+    Vector3d omega_tilde = Vector3d::Zero(); // Unconstrained angular velocity.
+    Vector3d f = Vector3d::Zero(); // Linear force.
+    Vector3d tau = Vector3d::Zero(); // Angular force (torque).
 
-    Vector3d fc;                 // Linear constraint force.
-    Vector3d tauc;               // Angular constraint force
+    Vector3d fc = Vector3d::Zero(); // Linear constraint force.
+    Vector3d tauc = Vector3d::Zero(); // Angular constraint force
 };
 
 class DeformableObject : public Object
 {
 public:
 
-    DeformableObject(int idx = -1, const std::string& meshFilename = "") : Object(idx)
+    DeformableObject(int idx = -1, const std::string& meshFilename = "") : Object(idx,meshFilename)
     {
         char* filenamePtr = const_cast<char*>(meshFilename.c_str());
         create_tetrahedral_mesh(filenamePtr);
@@ -144,9 +132,47 @@ public:
 };
 
 // these are the haptic objects
-class GodObject : public RigidObject
-{
+class GodObject : public RigidObject {
+
 public:
+
+    GodObject(cGenericHapticDevicePtr a_device = NULL, int idx = -1, const std::string &meshFilename = "", bool visualizeGodObject = false) : RigidObject(idx, meshFilename) {
+        device = a_device;
+        if (visualizeGodObject)
+        {
+
+        }
+    }
+
+    void updateComplementarityProblem(double dt)
+    {
+        xdot_tilde = (x_d - x);
+        x_tilde = x_d ;
+        xdot.setZero();
+    }
+
+    void updateFromDevice()
+    {
+        cVector3d temp; device->getPosition(temp);
+        x_d = s*temp.eigen();
+    }
+
+    void loadGodObjectMesh()
+    {
+
+    }
+
+    Vector3d x_d = Vector3d::Identity(); // The position of the haptic device
+    Quaterniond q_d = Quaterniond::Identity(); // The orientation of the haptic device
+    cMultiMesh* vis;
+    double s = 15; // workspace scaling
+    double r = 0.025; // radius of haptic sphere
+    cGenericHapticDevicePtr device; // the haptic device
+    double K = 1000; // the coupling stiffness of the god object
+    double B = 10; // the coupling damping of the god object
+    cMultiMesh* godObjectVis; // visualize the god object
+    double t = 0;
+
 };
 
 class DeformableGodObject : public DeformableObject

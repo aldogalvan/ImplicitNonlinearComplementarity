@@ -41,6 +41,11 @@ public:
     void step(double dt);
     void updateGraphics();
     void computeConstraints(double dt);
+    VectorXd computeResidual(const VectorXd&, const Quaterniond&, const VectorXd &, const VectorXd&, const VectorXd&, const MatrixXd &,
+                             const vector<Contact*>&, double);
+    void backtrackingLineSearch(double &, double &, const VectorXd &, const VectorXd &, const VectorXd &,
+                                const VectorXd &,const VectorXd&, const VectorXd&, const MatrixXd &,
+                                const vector<Contact*>&, double, double, double, int);
 
     cWorld* m_world;
     vector<RigidObject*> m_objects;

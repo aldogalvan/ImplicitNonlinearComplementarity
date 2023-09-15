@@ -133,32 +133,6 @@ std::shared_ptr<AABBNode> buildAABB(Eigen::Ref<const Eigen::MatrixXd> startPos,
 }
 
 
-std::shared_ptr<AABBNode> buildAABB(Eigen::Ref<const Eigen::MatrixXd> pos, Eigen::Ref<const Eigen::MatrixXi> F )
-{
-    int ntris = F.rows();
-    vector<std::shared_ptr<AABBNode>> leaves(ntris);
-    for (int j = 0; j < ntris; j++) {
-        auto leaf = std::make_shared<AABBNode>();
-        leaf->childtri = j;
-        Eigen::Vector3i face = F.row(j).transpose();
-        BBox box;
-        for (int k = 0; k < 3; k++) {
-            box.mins[k] = numeric_limits<double>::infinity();
-            box.maxs[k] = -numeric_limits<double>::infinity();
-        }
-        for (int k = 0; k < 3; k++) {
-            Eigen::Vector3d point = pos.row(face[k]).transpose();
-            for (int l = 0; l < 3; l++) {
-                box.mins[l] = min(box.mins[l], point[l]);
-                box.maxs[l] = max(box.maxs[l], point[l]);
-            }
-        }
-        leaf->box = box;
-        leaves[j] = leaf;
-    }
-    return buildAABB(leaves);
-}
-
 void intersect(std::shared_ptr<AABBNode> left,
                std::shared_ptr<AABBNode> right,
                std::vector<Collision>& collisions)

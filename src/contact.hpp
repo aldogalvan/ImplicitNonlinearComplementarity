@@ -49,7 +49,8 @@ public:
     Vector3d contact_wrt_objectB;     // the contact pont for object B
     RigidObject* objectA;     // the pointer to object A
     RigidObject* objectB;     // the pointer to object B
-    double mu = 0.5; // friciton constant
+    double mu = 0.5;            // friciton constant
+    double contactTol = 1e-6; // contact tolerance
 };
 
 

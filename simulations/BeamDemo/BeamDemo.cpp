@@ -1,16 +1,19 @@
-#include "DeformableBodyDemo.h"
 
-void DeformableBodyDemo::initialize()
+
+#include "BeamDemo.h"
+
+
+void BeamDemo::initialize()
 {
     // add a gummy bear to the scene
     int i = 0;
-    m_objects.emplace_back(new DeformableObject(i,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/DeformableBodyDemo/beam.off"));
+    m_objects.emplace_back(new DeformableObject(i,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/BeamDemo/beam.off"));
     m_objects.back()->set_local_pos(Vector3d(0,sqrt(3)/4*0.55,0.0));
     m_objects.back()->getMesh(0)->m_material->setPurple();
     m_objects.back()->getMesh(0)->m_material->setShininess(0.5);
 
     m_world->addChild(m_objects.back());
-    m_objects.back()->initializeVisualizer();
+    m_objects.back()->import_mesh_data();
 
     // find the beam leftmost points and pin them
     auto& obj = m_objects.back();
@@ -49,7 +52,7 @@ void DeformableBodyDemo::initialize()
 
 }
 
-void DeformableBodyDemo::step(double dt)
+void BeamDemo::step(double dt)
 {
 
     // reset forces
@@ -84,7 +87,7 @@ void DeformableBodyDemo::step(double dt)
     }
 }
 
-void DeformableBodyDemo::updateGraphics()
+void BeamDemo::updateGraphics()
 {
     for (auto object : m_objects)
     {
@@ -92,7 +95,7 @@ void DeformableBodyDemo::updateGraphics()
     }
 }
 
-void DeformableBodyDemo::computeConstraints(double dt)
+void BeamDemo::computeConstraints(double dt)
 {
     auto contacts = m_collisionDetector->m_contacts; // get contacts
     int num_objects = m_objects.size(); // get the number of objects
@@ -102,7 +105,7 @@ void DeformableBodyDemo::computeConstraints(double dt)
     int num_elements = 0;
     for (auto obj : m_objects)
     {
-        num_soft_constraints += 6*obj->linear_hookean_constraints.size();
+        num_soft_constraints += 9*obj->linear_hookean_constraints.size();
         num_hard_constraints += obj->fixed_constraints.size();
         num_elements += obj->m_numVerts;
     }
@@ -143,6 +146,12 @@ void DeformableBodyDemo::computeConstraints(double dt)
     for (int n = 0; n < m_settings.newtonIterations; n++)
     {
         cout << "Newton It = " << n << endl;
+
+        for (auto b : m_objects)
+        {
+            int bidx = b->m_idx;
+//            u.block<6,1>(6*bidx,0) = b->generalized_vel();
+        }
 
         ////////////////////////////////////////////////////////////////////////////////////
         /////////////////////////// THE CONTACT CONSTRAINTS ////////////////////////////////
@@ -197,28 +206,22 @@ void DeformableBodyDemo::computeConstraints(double dt)
             for (auto c : obj->linear_hookean_constraints)
             {
                 int tidx = c->tidx;
-                E.block<6,6>(tidx*6, tidx*6) = c->C;
+                VectorXd lambda_b = lambda_bilateral.block<6,1>(6*tidx,0);
+                E.block<9,9>(tidx*9, tidx*9) = c->C;
                 // the vertex indices that this constraint acts on
                 int vidx[4]; vidx[0] = c->v0; vidx[1] = c->v1; vidx[2] = c->v2; vidx[3] = c->v3;
-                // this constraint has 6 associated lagrange multipliers and acts on four vertices with 3 dof each
-                // therefore the constraint jacobian is 6 x 12
+                // this constraint has 9 associated lagrange multipliers and acts on four vertices with 3 dof each
+                // therefore the constraint jacobian is 9 x 12
                 auto J_b = c->computeJacobian(x);
-                cout << "DEBUG: J_b = " << J_b << endl;
-                int jctr = 0;
-                for (int i = 0 ; i < 4; i++)
+                for (int i = 0 ; i < 9; i++)
                 {
-                    for (int j = 0; j < 3; j++)
+                    for (int j = 0; j < 4; j++)
                     {
-                        J_bilateral.block<6, 1>(6 * tidx,3*vidx[i] + j) = J_b.col(jctr);
-
-                        jctr++;
+                        J_bilateral.block<1, 3>(9 * tidx + i,3 * vidx[j]) = J_b.block<1,3>( i,3 * j);
                     }
                 }
-                VectorXd lambda_b = lambda_bilateral.block<6,1>(6*tidx,0);
-                h_bilateral.block<6,1>(6*tidx,0) = c->compute_Cb(x) + c->C*lambda_b;
             }
         }
-
 
         ////////////////////////////////////////////////////////////////////////////////////
         ///////////////////// THE HARD KINEMATIC CONSTRAINTS //////////////////////////////
@@ -233,12 +236,13 @@ void DeformableBodyDemo::computeConstraints(double dt)
             {
                 int vidx = c->v0;
                 h_bilateral(ctr) = -c->compute_Cb(x);
+
                 J_bilateral.block<1, 3>(ctr, 3 * vidx) = c->computeJacobian(x);
                 ctr++;
             }
         }
 
-        cout << "DEBUG: h_bilateral = " << h_bilateral.transpose() << endl;
+        cout << "Finished" << endl;
 
         assert(!J_friction.hasNaN());
         assert(!J_normal.hasNaN());
@@ -324,6 +328,7 @@ void DeformableBodyDemo::computeConstraints(double dt)
         for (auto b : m_objects)
         {
             if (!b->is_static) {
+                int bidx = b->m_idx;
                 b->xdot = u;
                 b->x += dt * b->xdot;
             }

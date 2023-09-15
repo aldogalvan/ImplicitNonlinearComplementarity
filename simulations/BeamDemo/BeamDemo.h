@@ -1,7 +1,6 @@
 
-
-#ifndef IMPLICITNONLINEARCOMPLEMENTARITY_DEFORMABLEBODYDEMO_H
-#define IMPLICITNONLINEARCOMPLEMENTARITY_DEFORMABLEBODYDEMO_H
+#ifndef IMPLICITNONLINEARCOMPLEMENTARITY_BEAMDEMO_H
+#define IMPLICITNONLINEARCOMPLEMENTARITY_BEAMDEMO_H
 
 #include "chai3d.h"
 #include <Eigen/Dense>
@@ -23,17 +22,17 @@ struct Settings
     double nu = 0.5;
 };
 
-class DeformableBodyDemo
+class BeamDemo
 {
 public:
 
-    DeformableBodyDemo(cWorld* world)
+    BeamDemo(cWorld* world)
     {
         m_world = world;
         initialize();
     }
 
-    ~DeformableBodyDemo()
+    ~BeamDemo()
     {
 
     }
@@ -56,4 +55,5 @@ public:
 
 
 };
-#endif //IMPLICITNONLINEARCOMPLEMENTARITY_DEFORMABLEBODYDEMO_H
+
+#endif //IMPLICITNONLINEARCOMPLEMENTARITY_BEAMDEMO_H

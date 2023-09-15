@@ -7,7 +7,7 @@
 using namespace Eigen;
 
 //! A bunch of useful functions
-inline Eigen::VectorXd createGravityVector(int numVertices) {
+inline Eigen::VectorXd createGravityVector(int numVertices, double G) {
     // Calculate the total size of the resulting vector
     int totalSize = 3 * numVertices;
 
@@ -16,7 +16,7 @@ inline Eigen::VectorXd createGravityVector(int numVertices) {
 
     // Set the gravity component (-9.8) in the z-direction (every third element)
     for (int i = 2; i < totalSize; i += 3) {
-        gravityVector[i] = -0.98;
+        gravityVector[i] = -G;
     }
 
     return gravityVector;
@@ -38,6 +38,24 @@ inline VectorXd flattenMatrix(const Eigen::MatrixXd& matrix) {
     }
 
     return flattenedVector;
+}
+
+
+inline Eigen::Matrix3d reshape(const Eigen::VectorXd& flattened) {
+    Eigen::Matrix3d A;
+
+    int index = 0;
+    for (int y = 0; y < 3; y++) {
+        for (int x = 0; x <= y; x++, index++) {
+            if (x == y) {
+                A(x, y) = flattened[index];
+            } else {
+                A(x, y) = A(y, x) = flattened[index];
+            }
+        }
+    }
+
+    return A;
 }
 
 inline VectorXd flatten(const Matrix3d &A) {

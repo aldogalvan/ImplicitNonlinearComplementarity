@@ -3,6 +3,7 @@
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/external/collisiondetection" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/external/libigl" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/include/imgui" vcs="Git" />
   </component>
 </project>

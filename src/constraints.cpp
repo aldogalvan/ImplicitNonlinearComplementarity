@@ -25,6 +25,7 @@ Matrix<double, 9, 12> computedFdx(const Eigen::Matrix3d& DmInv) {
     return PFPu;
 }
 
+
 //////////////////////////////////////////////////////////////////////
 ////////////////////// THE FIXED CONSTRAINT //////////////////////////
 //////////////////////////////////////////////////////////////////////
@@ -48,16 +49,10 @@ double FixedConstraint::compute_Cb(VectorXd &x)
 ///////////////////// THE LINEAR CONSTRAINT //////////////////////////
 //////////////////////////////////////////////////////////////////////
 
-void LinearHookeanConstraint::computeC(VectorXd& x)
+void LinearHookeanConstraint::computeC()
 {
     C.resize(6,6);
     auto K_inv = K.inverse();
-
-    Vector3d p0 = x.block<3,1>(v0*3,0);
-    Vector3d p1 = x.block<3,1>(v1*3 ,0);
-    Vector3d p2 = x.block<3,1>(v2*3 ,0);
-    Vector3d p3 = x.block<3,1>(v3*3,0);
-
     C = K_inv / V0;
 }
 
@@ -105,21 +100,20 @@ void LinearHookeanConstraint::computeRestVolume(VectorXd& x)
 
 void LinearHookeanConstraint::setMaterialStiffnessMatrix(double E, double nu)
 {
-    K.resize(9,9);
+    // Compute the Lame parameters
+    double lambda = (E * nu) / ((1 + nu) * (1 - 2 * nu));
+    double mu = E / (2 * (1 + nu));
 
-    // Calculate material constants
-    double factor = E / ((1 + nu) * (1 - 2 * nu));
-    double factor2 = E / (2 * (1 + nu));
+    // Create the 6x6 material stiffness matrix (assuming 3D)
+    Eigen::MatrixXd stiffnessMatrix(6, 6);
 
-    K << factor * (1 - nu), factor * nu, factor * nu, 0, 0, 0, 0, 0, 0,
-            factor * nu, factor * (1 - nu), factor * nu, 0, 0, 0, 0, 0, 0,
-            factor * nu, factor * nu, factor * (1 - nu), 0, 0, 0, 0, 0, 0,
-            0, 0, 0, factor2, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, factor2, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, factor2, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, factor2, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, factor2, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, factor2;
+    stiffnessMatrix << lambda + 2 * mu, lambda, lambda, 0, 0, 0,
+            lambda, lambda + 2 * mu, lambda, 0, 0, 0,
+            lambda, lambda, lambda + 2 * mu, 0, 0, 0,
+            0, 0, 0, mu, 0, 0,
+            0, 0, 0, 0, mu, 0,
+            0, 0, 0, 0, 0, mu;
+    K = stiffnessMatrix;
 }
 
 MatrixXd LinearHookeanConstraint::computeGreenStrain(MatrixXd& F)
@@ -130,30 +124,25 @@ MatrixXd LinearHookeanConstraint::computeGreenStrain(MatrixXd& F)
 MatrixXd LinearHookeanConstraint::computeJacobian(VectorXd &x)
 {
     MatrixXd F = compute_F(x);
-    MatrixXd dEdF = 0.5* (F + F.transpose());
+    Matrix3d dSdF = 0.5 * (F + F.transpose());
     MatrixXd dFdx = computedFdx(Dm_inv);
+    MatrixXd dSdx(6,12);
 
-    // Loop through each 3x3 block in Matrix dFdX
-    for (int i = 0; i < 3; ++i) { // Loop through rows of 3x3 blocks
-        for (int j = 0; j < 4; ++j) { // Loop through columns of 3x3 blocks
-            // Get the current 3x3 block from Matrix B
-            Eigen::Matrix3d blockB = dFdx.block<3, 3>(i * 3, j * 3);
-
-            // Multiply the current block with Matrix A
-            auto temp = dEdF*blockB;
-
-            // Store the result back in the corresponding block of Matrix B
-            dFdx.block<3, 3>(i * 3, j * 3) = temp;
-        }
+    for (int i = 0 ; i < 12 ; i++)
+    {
+        dSdx.col(i) = strainTensorToVector(dSdF * reshape(dFdx.col(i)));
     }
-    return dFdx;
+
+    return dSdx;
 }
 
-// not used here but why not
-MatrixXd LinearHookeanConstraint::PK1(MatrixXd& F)
+VectorXd LinearHookeanConstraint::compute_Cb(Eigen::VectorXd &x)
 {
-    return 0.5*F*(computeGreenStrain(F));
+    MatrixXd F = compute_F(x);
+    VectorXd s = strainTensorToVector(0.5 * (F*F.transpose() - Matrix3d::Identity()));
+    return s;
 }
+
 
 //////////////////////////////////////////////////////////////////////
 /////////////////// THE COROTATIONAL CONSTRAINT //////////////////////

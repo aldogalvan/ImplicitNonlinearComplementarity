@@ -1,23 +1,11 @@
 #ifndef IMPLICITNONLINEARCOMPLEMENTARITY_PEGINHOLE_H
 #define IMPLICITNONLINEARCOMPLEMENTARITY_PEGINHOLE_H
 
-#include "../../src/objects.hpp"
+#include "objects.hpp"
+#include "collision.hpp"
+#include "contact.hpp"
 
-typedef enum {
-    LOCAL_SOLVER,
-    GLOBAL_SOLVER,
-} SolverType;
-
-struct Settings
-{
-    double K = 1000; double B = 100;
-    double linearTolerance = 1e-6;
-    int numLinearIterations = 20;
-    double newtonTolerance = 1e-6;
-    int numNewtonIterations = 20;
-    double mass = 10;
-    SolverType solverType = GLOBAL_SOLVER;
-};
+using namespace std;
 
 class PegInHole
 {
@@ -27,6 +15,15 @@ public:
     {
         m_devicePtr = device; m_world = world;
         initialize();
+        vis = new cMultiMesh();
+        vis->loadFromFile("/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/PegInHole/peg.obj");
+        vis->m_material->setYellowLightGoldenrod();
+        vis->scale(0.025);
+        vis->scale(0.99);
+        vis->setWireMode(true);
+        cout << "center = " << -vis->getMesh(0)->getCenterOfMass() << endl;
+        vis->getMesh(0)->offsetVertices(-vis->getMesh(0)->getCenterOfMass());
+        world->addChild(vis);
     }
 
     ~PegInHole()
@@ -36,17 +33,32 @@ public:
 
     void initialize(void);
     void step(double dt);
-    void solve_local();
-    void solve_global();
-
-    void update_haptics();
-    void update_graphics();
+    void updateGraphics();
+    void updateHaptics(Vector3d& f);
+    VectorXd computeResidual(const VectorXd&, const VectorXd &,const VectorXd &, const VectorXd &,
+                                        const VectorXd&, const VectorXd&, const MatrixXd &,
+                                        const vector<Contact*>&, double);
+    void backtrackingLineSearch(double &, double &, const VectorXd &, const VectorXd &, const VectorXd &,
+                                const VectorXd &,const VectorXd&, const VectorXd&, const MatrixXd &,
+                                const vector<Contact*>&, double, double, double, int);
 
     cGenericHapticDevicePtr m_devicePtr; // the pointer to the haptic device
     cWorld* m_world;
-    RigidObject* peg;
+    GodObject* peg;
     RigidObject* block;
-    Settings m_settings;
+    cMultiMesh* vis;
+
+
+    // Simulation constants
+    int numNewtonIt = 20;
+    int backtrackingIt = 10;
+    double alpha = 0.5; double beta = 0.2;
+
+    // System submatrices
+    MatrixXd C_h; // compliance matrix used for haptic feedback
+    MatrixXd J; // the constraint jacobian
+    MatrixXd C; // the compliance matrix
+    MatrixXd M; // the mass matrix
 
 };
 #endif //IMPLICITNONLINEARCOMPLEMENTARITY_PEGINHOLE_H

@@ -38,12 +38,12 @@ public:
 
         setMaterialStiffnessMatrix(E,nu);
         computeRestVolume(x);
-        computeC(x);
+        computeC();
         compute_Dm(x);
     }
 
     void updateConstraint();
-    void computeC(VectorXd& x);
+    void computeC();
     void compute_Dm(VectorXd& x);
     MatrixXd compute_F(VectorXd& x);
     void computeRestVolume(VectorXd& x);
@@ -55,9 +55,9 @@ public:
 
 public:
 
-    MatrixXd K; // the material stiffness matrix (9x9)
+    MatrixXd K; // the material stiffness matrix
     MatrixXd E; // the strain tensor
-    MatrixXd C; // the compliance matrix (9x9)
+    MatrixXd C; // the compliance matrix (6x6)
     MatrixXd Dm_inv;
     double V0; //  the rest volumes
     int tidx; // the tetrahedron idx

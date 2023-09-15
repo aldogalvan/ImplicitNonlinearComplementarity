@@ -17,6 +17,10 @@ INCLUDE_DIRECTORIES(${CHAI3D_INCLUDE_DIRS})
 #EIGEN3
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
 
+#GnuPlot
+find_package(Gnuplot REQUIRED)
+include_directories(${GNUPLOT_INCLUDE_DIRS})
+
 # GLFW
 if (EXISTS ${PROJECT_SOURCE_DIR}/extras/GLFW)
     add_subdirectory (${PROJECT_SOURCE_DIR}/extras/GLFW)
@@ -37,33 +41,29 @@ include_directories(external/tetgen)
 include_directories(include/imgui)
 include_directories(include/imgui/backends)
 include_directories(src)
+include_directories(external/libigl/include)
 
 file(GLOB_RECURSE IMPLICIT_LCP_SOURCES  src/*.cpp src/*.hpp external/tetgen/*.cpp external/tetgen/*.h)
 add_library(ImplicitLCP ${IMPLICIT_LCP_SOURCES})
 add_definitions(-DTETLIBRARY)
 
 target_link_libraries(ImplicitLCP PUBLIC
+        ${GNUPLOT_LIBRARIES}
         collisiondetection
         ${CHAI3D_LIBRARIES}
         ${GLFW_LIBRARIES}
         Eigen3::Eigen
         drake::drake)
 
-
 add_executable(PegInHole simulations/PegInHole/main.cpp simulations/PegInHole/PegInHole.cpp)
 add_executable(RigidBodyDemo simulations/RigidBodyDemo/main.cpp simulations/RigidBodyDemo/RigidBodyDemo.cpp)
 add_executable(DeformableBodyDemo simulations/DeformableBodyDemo/main.cpp simulations/DeformableBodyDemo/DeformableBodyDemo.cpp)
+add_executable(HapticDemo simulations/HapticDemo/main.cpp simulations/HapticDemo/HapticDemo.cpp)
 
-#target_link_libraries(RigidBodiesDemo PUBLIC
-#        ImplicitLCP)
-#target_link_libraries(HapticsDemoQuasistatic PUBLIC ImplicitLCP)
-#target_link_libraries(HapticsDemo PUBLIC ImplicitLCP)
-#target_link_libraries(HapticsDemoRigid PUBLIC ImplicitLCP)
-#target_link_libraries(HapticsDemoDeformable PUBLIC ImplicitLCP)
 target_link_libraries(PegInHole PUBLIC ImplicitLCP)
 target_link_libraries(RigidBodyDemo PUBLIC ImplicitLCP)
 target_link_libraries(DeformableBodyDemo PUBLIC ImplicitLCP)
-
+target_link_libraries(HapticDemo PUBLIC ImplicitLCP)
 
 add_subdirectory(simulations/PegInHoleQt)
 

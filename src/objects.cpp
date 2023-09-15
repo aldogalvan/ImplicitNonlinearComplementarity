@@ -1,36 +1,108 @@
 #include "objects.hpp"
 #include "tetgen.h"
-
+#include <igl/readOBJ.h>
+#include <igl/readSTL.h>
+#include <igl/readOFF.h>
+#include <igl/remove_duplicate_vertices.h>
+#include <igl/centroid.h>
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////// BASE OBJECT /////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-
-void Object::import_mesh_data()
+void Object::loadMesh(const std::string& filename)
 {
-    // Get the number of vertices and triangles in the mesh
-    int numVertices = this->getNumVertices();
-    int numTriangles = this->getNumTriangles();
-
-    // Resize the Eigen matrices to accommodate the vertices and triangles
-    m_vertices.resize(numVertices, 3);
-    m_triangles.resize(numTriangles, 3);
-
-    // Fill the vertices matrix
-    for (int i = 0; i < numVertices; ++i) {
-
-        const cVector3d& vertex = this->getVertexPos(i).eigen();
-        m_vertices.row(i) << vertex.x(), vertex.y(), vertex.z();
+    // Determine the file extension
+    size_t dotPos = filename.find_last_of('.');
+    if (dotPos == std::string::npos)
+    {
+        std::cerr << "Invalid file: " << filename << std::endl;
+        return;
     }
 
-    // Fill the triangles matrix
-    for (int i = 0; i < numTriangles; ++i) {
-        cVector3d triangle (this->getMesh(0)->m_triangles->getVertexIndex0(i),
-                            this->getMesh(0)->m_triangles->getVertexIndex1(i),
-                            this->getMesh(0)->m_triangles->getVertexIndex2(i));
-        m_triangles.row(i) << triangle.x(), triangle.y(), triangle.z();
+    std::string extension = filename.substr(dotPos + 1);
+    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+
+    // Load the mesh based on the file extension
+    Eigen::MatrixXd V;
+    Eigen::MatrixXi F;
+    Eigen::MatrixXd N;
+
+    if (extension == "obj")
+    {
+        if (!igl::readOBJ(filename, V, F))
+        {
+            std::cerr << "Error loading OBJ file: " << filename << std::endl;
+            return;
+        }
+    }
+//    else if (extension == "stl")
+//    {
+//        if (!igl::readSTL(filename, V, F, N))
+//        {
+//            std::cerr << "Error loading STL file: " << filename << std::endl;
+//            return;
+//        }
+//    }
+    else if (extension == "off")
+    {
+        if (!igl::readOFF(filename, V, F))
+        {
+            std::cerr << "Error loading OFF file: " << filename << std::endl;
+            return;
+        }
+    }
+    else
+    {
+        std::cerr << "Invalid file type: " << extension << std::endl;
+        return;
+    }
+
+    // Calculate the centroid (mean) of the vertices
+    Eigen::RowVector3d centroid;
+    igl::centroid(V, F, centroid);
+
+    if (centroid.hasNaN())
+        centroid = V.colwise().sum() / (double)V.rows();
+
+    // Translate the vertices to center the mesh around the origin
+    V.rowwise() -= centroid;
+
+    // Store the loaded vertex and triangle information in member variables
+    m_vertices = V;
+    m_triangles = F;
+    m_normals = N;
+
+    // Optionally, compute normals if needed
+    // igl::per_vertex_normals(V, F, m_normals);
+
+    // transfers the data to chai3d
+    initializeVisualizer();
+}
+
+void Object::scaleMesh(const double s)
+{
+    m_vertices *= s;
+    this->scale(s);
+}
+
+
+void Object::initializeVisualizer()
+{
+    // create a new mesh
+    this->newMesh();
+    cMesh* mesh = getMesh(0);
+
+    // create triangles and vertices for the mesh
+    for (int vidx = 0; vidx < m_vertices.rows(); vidx++)
+    {
+        mesh->newVertex(cVector3d(m_vertices.row(vidx)));
+    }
+
+    for (int tidx = 0; tidx < m_triangles.rows(); tidx++)
+    {
+        mesh->newTriangle(m_triangles(tidx,0),m_triangles(tidx,1),m_triangles(tidx,2));
     }
 }
 
@@ -40,16 +112,34 @@ void Object::import_mesh_data()
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
+VectorXd RigidObject::get_configuration() {
+    VectorXd ret(7);
+    ret.head(3) = x;
+    ret(3) = q.w();
+    ret(4) = q.x();
+    ret(5) = q.y();
+    ret(6) = q.z();
+    return ret;
+}
+
+VectorXd RigidObject::get_configuration_unconstrained() {
+    VectorXd ret(7);
+    ret.head(3) = x_tilde;
+    ret(3) = q_tilde.w();
+    ret(4) = q_tilde.x();
+    ret(5) = q_tilde.y();
+    ret(6) = q_tilde.z();    return ret;
+}
 
 void RigidObject::set_local_pos(Eigen::Vector3d pos) {
     this->setLocalPos(pos);
-    x_last = pos;
+    x_tilde = pos;
     x = pos;
 }
 
 void RigidObject::set_local_rot(Quaterniond rot)
 {
-    q_last = rot;
+    q_tilde = rot;
     q = rot;
 }
 
@@ -187,14 +277,13 @@ void RigidObject::update_mesh_position()
 
 bool DeformableObject::create_tetrahedral_mesh(char* filename)
 {
-
     tetgenio input;
 
     this->newMesh();
     cMesh* mesh = this->getMesh(0);
 
     // TetGen switches
-    char TETGEN_SWITCHES[] = "pq1.414a0.002";
+    char TETGEN_SWITCHES[] = "pq1.414a0.02";
 
     if (input.load_off(filename))
     {

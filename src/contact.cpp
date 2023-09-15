@@ -143,10 +143,11 @@ void Contact::compute_constraints(double r_n, double r_f, double lambda_n, Vecto
     phi_n = fischer(C_n, r_n * lambda_n);
 
     double d_fischer_d_a = fischer_partial_a(C_n, r_n * lambda_n);
+
     J_n_A = (d_fischer_d_a * grad_C_n_A).transpose();
 //    cout << "J_n_A = " << J_n_A << endl;
     assert(!J_n_A.hasNaN());
-    J_n_B = (d_fischer_d_a* grad_C_n_B).transpose();
+    J_n_B = (d_fischer_d_a * grad_C_n_B).transpose();
 //    cout << "J_n_B = " << J_n_B << endl;
     assert(!J_n_B.hasNaN());
     phi_n_wrt_lambda_n = fischer_partial_b(C_n, r_n * lambda_n) * r_n;

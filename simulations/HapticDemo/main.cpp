@@ -1,6 +1,8 @@
 #include <iostream>
 #include "chai3d.h"
-#include "RigidBodyDemo.h"
+#include "HapticDemo.h"
+#include <thread>
+#include <chrono>
 //------------------------------------------------------------------------------
 #include "../../extras/GLFW/include/GLFW/glfw3.h"
 //------------------------------------------------------------------------------
@@ -47,7 +49,7 @@ bool mirroredDisplay = false;
 //------------------------------------------------------------------------------
 
 //
-RigidBodyDemo* sim;
+HapticDemo* sim;
 
 // a world that contains all objects of the virtual environment
 cWorld* world;
@@ -74,6 +76,9 @@ bool simulationFinished = true;
 cFrequencyCounter freqCounterGraphics;
 
 // a frequency counter to measure the simulation haptic rate
+cFrequencyCounter freqCounterHaptics;
+
+// a frequency counter to measure the simulation haptic rate
 cFrequencyCounter freqCounterSimulation;
 
 // mouse state
@@ -82,8 +87,11 @@ MouseStates mouseState = MOUSE_IDLE;
 // last mouse position
 double mouseX, mouseY;
 
-// haptic thread
+// simulation thread
 cThread* simulationThread;
+
+// the haptic thread
+cThread* hapticThread;
 
 // a handle to window display context
 GLFWwindow* window = NULL;
@@ -96,6 +104,15 @@ int height = 0;
 
 // swap interval for the display context (vertical synchronization)
 int swapInterval = 1;
+
+// number of haptic devices
+int numHapticDevices = 0;
+
+// a haptic device handler
+cHapticDeviceHandler* handler;
+
+// a pointer to the current haptic device
+cGenericHapticDevicePtr hapticDevice;
 
 
 //------------------------------------------------------------------------------
@@ -123,8 +140,11 @@ void mouseScrollCallback(GLFWwindow* a_window, double a_offsetX, double a_offset
 // this function renders the scene
 void updateGraphics(void);
 
-// this function contains the main haptics simulation loop
+// this function contains the main simulation loop
 void updateSimulation(void);
+
+// this function contains the main haptics rendering loop
+void updateHaptics(void);
 
 // this function closes the application
 void close(void);
@@ -233,6 +253,7 @@ int main(int argc, char* argv[])
     }
 #endif
 
+
     //--------------------------------------------------------------------------
     // WORLD - CAMERA - LIGHTING
     //--------------------------------------------------------------------------
@@ -241,7 +262,7 @@ int main(int argc, char* argv[])
     world = new cWorld();
 
     // set the background color of the environment
-    world->m_backgroundColor.setBlack();
+    world->m_backgroundColor.setWhite();
 
     // create a camera and insert it into the virtual world
     camera = new cCamera(world);
@@ -277,8 +298,32 @@ int main(int argc, char* argv[])
     // define direction of light beam
     light->setDir(-1.0, 0.0, 0.0);
 
-    // start simulation
-    sim = new RigidBodyDemo(world);
+
+    //--------------------------------------------------------------------------
+    // HAPTIC DEVICE
+    //--------------------------------------------------------------------------
+
+    // create a haptic device handler
+    handler = new cHapticDeviceHandler();
+
+    // gets the number of haptic devices
+    numHapticDevices = handler->getNumDevices();
+
+    // info
+    cHapticDeviceInfo info;
+
+    // get a handle to the first haptic device
+    handler->getDevice(hapticDevice, 0);
+
+    // open a connection to haptic device
+    hapticDevice->open();
+
+    // calibrate device (if necessary)
+    hapticDevice->calibrate();
+
+    // retrieve information about the current haptic device
+    info = hapticDevice->getSpecifications();
+
 
     //--------------------------------------------------------------------------
     // WIDGETS
@@ -295,13 +340,19 @@ int main(int argc, char* argv[])
     // START SIMULATION
     //--------------------------------------------------------------------------
 
-    // create a thread which starts the main haptics rendering loop
+    // start simulation
+    sim = new HapticDemo(world, hapticDevice);
+
+    // create a thread which starts the main physics rendering loop
     simulationThread = new cThread();
     simulationThread->start(updateSimulation, CTHREAD_PRIORITY_SIMULATION);
 
+    // create the a thread which starts the main haptics rendering loop
+    hapticThread = new cThread();
+    hapticThread->start(updateHaptics, CTHREAD_PRIORITY_HAPTICS);
+
     // setup callback when application exits
     atexit(close);
-
 
     //--------------------------------------------------------------------------
     // MAIN GRAPHIC LOOP
@@ -497,7 +548,7 @@ void updateGraphics(void)
 
 
     // update haptic and graphic rate data
-    labelRates->setText(cStr(freqCounterGraphics.getFrequency(), 0) + " Hz / " +
+    labelRates->setText(cStr(freqCounterHaptics.getFrequency(), 0) + " Hz / " +
                         cStr(freqCounterSimulation.getFrequency(), 0) + " Hz");
 
     // update position of label
@@ -543,11 +594,42 @@ void updateSimulation(void) {
         double dt = clock.getCurrentTimeSeconds();
         clock.start(true);
 
+        // Delay for 2 seconds (2000 milliseconds)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
         // steps the simulation by dt
         sim->step(dt);
 
         // update frequency counter
         freqCounterSimulation.signal(1);
+    }
+
+    // exit haptics thread
+    simulationFinished = true;
+}
+
+void updateHaptics(void)
+{
+    // simulation in now running
+    simulationRunning = true;
+    simulationFinished = false;
+
+    cPrecisionClock clock;
+
+    // main haptic simulation loop
+    while (simulationRunning) {
+
+        clock.stop();
+        double dt = clock.getCurrentTimeSeconds();
+        clock.start(true);
+
+        // updates haptics and returns force
+        Vector3d f;
+        sim->updateHaptics(f,dt);
+        hapticDevice->setForce(f);
+
+        // update frequency counter
+        freqCounterHaptics.signal(1);
     }
 
     // exit haptics thread
