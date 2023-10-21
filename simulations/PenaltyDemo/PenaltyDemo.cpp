@@ -1,5 +1,5 @@
 
-#include "PegInHole.hpp"
+#include "PenaltyDemo.hpp"
 
 
 inline double W_fischer(const MatrixXd& D, const VectorXd& qdot, const VectorXd& lambda_f,
@@ -51,10 +51,10 @@ inline double fischer(double C_n, double lambda_n) {
     return  C_n + lambda_n - sqrt(C_n * C_n + lambda_n * lambda_n) ;
 }
 
-VectorXd PegInHole::computeResidual(const VectorXd &x, const VectorXd &u,
+VectorXd PenaltyDemo::computeResidual(const VectorXd &x, const VectorXd &u,
                                     const VectorXd &delta_u, const VectorXd &u_tilde,
-                                const VectorXd& lambda, const VectorXd& delta_lambda, const MatrixXd &M_tilde,
-                                const vector<Contact*>& contacts, double dt) {
+                                    const VectorXd& lambda, const VectorXd& delta_lambda, const MatrixXd &M_tilde,
+                                    const vector<Contact*>& contacts, double dt) {
     int num_contacts = contacts.size();
     VectorXd r(3 + lambda.rows());
     MatrixXd J_n(num_contacts,3);
@@ -99,11 +99,11 @@ VectorXd PegInHole::computeResidual(const VectorXd &x, const VectorXd &u,
     return r;
 }
 
-void PegInHole::backtrackingLineSearch(double &t, double &err,
-                                          const VectorXd &x, const VectorXd &u,
-                                          const VectorXd &u_tilde, const VectorXd &delta_u,
-                                          const VectorXd& lambda, const VectorXd& delta_lambda, const MatrixXd &M_tilde,
-                                          const vector<Contact*>& contacts, double dt, double alpha, double beta, int max_iter) {
+void PenaltyDemo::backtrackingLineSearch(double &t, double &err,
+                                       const VectorXd &x, const VectorXd &u,
+                                       const VectorXd &u_tilde, const VectorXd &delta_u,
+                                       const VectorXd& lambda, const VectorXd& delta_lambda, const MatrixXd &M_tilde,
+                                       const vector<Contact*>& contacts, double dt, double alpha, double beta, int max_iter) {
 //    VectorXd grad_err = delta_lambda_n;
 //    double err_k;
 //
@@ -125,7 +125,7 @@ void PegInHole::backtrackingLineSearch(double &t, double &err,
 //    err = err_k;
 }
 
-void PegInHole::initialize()
+void PenaltyDemo::initialize()
 {
     // create the meshes
 //    peg = new GodObject(m_devicePtr,0,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/RigidBodyDemo/cube.obj");
@@ -155,12 +155,12 @@ void PegInHole::initialize()
     cout << "Block Vertices = " << block->getNumVertices() << endl;
 }
 
-void PegInHole::updateHaptics(Vector3d& f)
+void PenaltyDemo::updateHaptics(Vector3d& f)
 {
     peg->updateFromDevice();
 }
 
-void PegInHole::step(double dt)
+void PenaltyDemo::step(double dt)
 {
 
     // update the variables of the complementarity problem
@@ -182,7 +182,7 @@ void PegInHole::step(double dt)
     vector<cShapeLine*> colvis;
 
     if (CollisionDetector::findCollisionsRigidRigid(peg_start,peg_end,peg_vertices, peg_triangles,
-                                block_start, block_end, block_vertices, block_triangles, contacts,colvis))
+                                                    block_start, block_end, block_vertices, block_triangles, contacts,colvis))
     {
 
         for (int cidx = 0 ; cidx < colvis.size() ; cidx ++)
@@ -311,7 +311,7 @@ void PegInHole::step(double dt)
                     delta_lambda[i] = 0;
             }
 
-                // the residual of this function
+            // the residual of this function
             // VectorXd r = computeResidual(x, u, u_tilde, lambda_normal, M, colInfo, dt);
 
             // the backtracking line search
@@ -346,7 +346,7 @@ void PegInHole::step(double dt)
 
 }
 
-void PegInHole::updateGraphics()
+void PenaltyDemo::updateGraphics()
 {
     peg->update_mesh_position();
     block->update_mesh_position();

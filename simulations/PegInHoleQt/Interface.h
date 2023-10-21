@@ -3,6 +3,7 @@
 #ifndef IMPLICITNONLINEARCOMPLEMENTARITY_INTERFACE_H
 #define IMPLICITNONLINEARCOMPLEMENTARITY_INTERFACE_H
 
+#include <QtGui>
 
 #include "ui_Interface.h"
 //------------------------------------------------------------------------------

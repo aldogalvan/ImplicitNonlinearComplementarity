@@ -3,8 +3,61 @@
 #define IMPLICITNONLINEARCOMPLEMENTARITY_HELPER_HPP
 
 #include <Eigen/Dense>
+#include "chai3d.h"
+#include <vector>
 
+using namespace chai3d;
 using namespace Eigen;
+using namespace std;
+
+inline double randomDouble()
+{
+    return (double) rand() / (double) RAND_MAX;
+}
+
+inline vector<cVector3d> distributePointsInTriangle(const cVector3d& A, const cVector3d& B, const cVector3d& C, int numPoints) {
+    vector<cVector3d> points;
+    points.reserve(numPoints);
+
+    for (int i = 0; i < numPoints; i++) {
+        double s = randomDouble();
+        double t = randomDouble();
+
+        if (s + t > 1) {
+            s = 1 - s;
+            t = 1 - t;
+        }
+
+        cVector3d point = A * (1 - s - t) + B * s + C * t;
+        points.push_back(point);
+    }
+
+    return points;
+}
+
+inline cTransform compute_triangle_transform(const cVector3d& v0, const cVector3d& v1, const cVector3d& v2)
+{
+    // Compute position of triangle as centroid of vertices
+    cVector3d pos = (v0 + v1 + v2) / 3.0;
+
+    // Compute orientation of triangle as normal vector of plane
+    cVector3d normal = cCross(v1 - v0, v2 - v0);
+    normal.normalize();
+
+    // Compute rotation matrix from normal vector
+    cVector3d up(0.0, 1.0, 0.0);
+    cVector3d axis = cCross(up, normal);
+    double angle = acos(cDot(up, normal));
+    cMatrix3d rot;
+    rot.setAxisAngleRotationRad(axis, angle);
+
+    // Create transform with position and orientation
+    cTransform T;
+    T.setLocalPos(pos);
+    T.setLocalRot(rot);
+
+    return T;
+}
 
 //! A bunch of useful functions
 inline Eigen::VectorXd createGravityVector(int numVertices, double G) {

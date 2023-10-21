@@ -347,6 +347,7 @@ bool CollisionDetector::findCollisionsRigidRigid(const VectorXd& object1_start_p
                 1e-6,
                 t))
         {
+            flag = true;
             contacts.emplace_back(new Contact());
             contacts.back()->t = t;
             Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();

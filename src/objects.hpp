@@ -6,6 +6,7 @@
 #include "chai3d.h"
 #include "helper.hpp"
 #include "constraints.hpp"
+#include <set>
 
 using namespace chai3d;
 using namespace Eigen;
@@ -175,10 +176,67 @@ public:
 
 };
 
-class DeformableGodObject : public DeformableObject
+
+class PenaltyObject : public RigidObject
 {
+    struct Sensor
+    {
+        Vector3d startPos; // start position defined in local frame of reference
+        Vector3d normal; // end position defined in local frame of reference
+        double len;
+    };
+
 public:
 
+    PenaltyObject(int idx = -1, const std::string& meshFilename = "") : RigidObject(idx,meshFilename)
+    {
+
+    }
+
+    ~PenaltyObject()
+    {
+
+    }
+
+    void wrapMesh();
+
+    vector<set<int>> vertexNeighbors;
+    vector<Vector3d> vertexNormals;
+    vector<vector<Sensor*>> m_sensors;
+
+    double density = 1e3;
+};
+
+class PenaltyGodObject : public PenaltyObject
+{
+    PenaltyGodObject(cGenericHapticDevicePtr a_device = NULL, int idx = -1, const std::string& meshFilename = "") : PenaltyObject(idx,meshFilename)
+    {
+        device = a_device;
+    }
+
+    ~PenaltyGodObject(){}
+
+    void updateFromDevice()
+    {
+        cVector3d temp; device->getPosition(temp);
+        x_d = s*temp.eigen();
+    }
+
+    void loadGodObjectMesh()
+    {
+
+    }
+
+    Vector3d x_d = Vector3d::Identity(); // The position of the haptic device
+    Quaterniond q_d = Quaterniond::Identity(); // The orientation of the haptic device
+    cMultiMesh* vis;
+    double s = 15; // workspace scaling
+    double r = 0.025; // radius of haptic sphere
+    cGenericHapticDevicePtr device; // the haptic device
+    double K = 1000; // the coupling stiffness of the god object
+    double B = 10; // the coupling damping of the god object
+    cMultiMesh* godObjectVis; // visualize the god object
+    double t = 0;
 };
 
 #endif //IMPLICITNONLINEARCOMPLEMENTARITY_LCP_HPP

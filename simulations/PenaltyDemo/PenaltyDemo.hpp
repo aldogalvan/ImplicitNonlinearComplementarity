@@ -1,5 +1,7 @@
-#ifndef IMPLICITNONLINEARCOMPLEMENTARITY_PEGINHOLE_H
-#define IMPLICITNONLINEARCOMPLEMENTARITY_PEGINHOLE_H
+
+
+#ifndef IMPLICITNONLINEARCOMPLEMENTARITY_PENALTYDEMO_H
+#define IMPLICITNONLINEARCOMPLEMENTARITY_PENALTYDEMO_H
 
 #include "objects.hpp"
 #include "collision.hpp"
@@ -7,11 +9,11 @@
 
 using namespace std;
 
-class PegInHole
+class PenaltyDemo
 {
 public:
 
-    PegInHole(cWorld* world, cGenericHapticDevicePtr device = NULL)
+    PenaltyDemo(cWorld* world, cGenericHapticDevicePtr device = NULL)
     {
         m_devicePtr = device; m_world = world;
         initialize();
@@ -26,7 +28,7 @@ public:
         world->addChild(vis);
     }
 
-    ~PegInHole()
+    ~PenaltyDemo()
     {
 
     }
@@ -36,8 +38,8 @@ public:
     void updateGraphics();
     void updateHaptics(Vector3d& f);
     VectorXd computeResidual(const VectorXd&, const VectorXd &,const VectorXd &, const VectorXd &,
-                                        const VectorXd&, const VectorXd&, const MatrixXd &,
-                                        const vector<Contact*>&, double);
+                             const VectorXd&, const VectorXd&, const MatrixXd &,
+                             const vector<Contact*>&, double);
     void backtrackingLineSearch(double &, double &, const VectorXd &, const VectorXd &, const VectorXd &,
                                 const VectorXd &,const VectorXd&, const VectorXd&, const MatrixXd &,
                                 const vector<Contact*>&, double, double, double, int);
@@ -61,4 +63,5 @@ public:
     MatrixXd M; // the mass matrix
 
 };
-#endif //IMPLICITNONLINEARCOMPLEMENTARITY_PEGINHOLE_H
+
+#endif //IMPLICITNONLINEARCOMPLEMENTARITY_PENALTYDEMO_H

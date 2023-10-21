@@ -3,7 +3,6 @@
 #include <igl/readOBJ.h>
 #include <igl/readSTL.h>
 #include <igl/readOFF.h>
-#include <igl/remove_duplicate_vertices.h>
 #include <igl/centroid.h>
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -60,14 +59,15 @@ void Object::loadMesh(const std::string& filename)
     }
 
     // Calculate the centroid (mean) of the vertices
-    Eigen::RowVector3d centroid;
-    igl::centroid(V, F, centroid);
-
-    if (centroid.hasNaN())
-        centroid = V.colwise().sum() / (double)V.rows();
+    Eigen::Vector3d centroid;
+    for (int k = 0 ; k < V.rows(); k++)
+    {
+        centroid += V.row(k);
+    }
+    centroid /= V.rows();
 
     // Translate the vertices to center the mesh around the origin
-    V.rowwise() -= centroid;
+    V.rowwise() -= centroid.transpose();
 
     // Store the loaded vertex and triangle information in member variables
     m_vertices = V;
@@ -382,4 +382,117 @@ MatrixXd DeformableObject::mass_matrix()
 MatrixXd DeformableObject::inverse_mass_matrix()
 {
     return m_numVerts*MatrixXd::Identity(3*m_numVerts,3*m_numVerts) / mass;
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////// PENALTY OBJECT /////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void PenaltyObject::wrapMesh(void)
+{
+    cMesh* mesh = this->getMesh(0);
+    cTransform transform = mesh->getLocalTransform();
+
+    int num_triangles = mesh->getNumTriangles();
+    int num_vertices = mesh->getNumVertices();
+    m_sensors.resize(num_triangles);
+    vertexNeighbors.resize(num_vertices);
+    vertexNormals.resize(num_vertices);
+
+    for (int triangle_idx = 0; triangle_idx < num_triangles; triangle_idx++)
+    {
+        const auto& v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
+        const auto& v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
+        const auto& v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
+        const auto& area = mesh->m_triangles->computeArea(triangle_idx);
+        const auto& normal = mesh->m_triangles->computeNormal(triangle_idx, true);
+        const auto& pos1 = mesh->m_vertices->getLocalPos(v1);
+        const auto& pos2 = mesh->m_vertices->getLocalPos(v2);
+        const auto& pos3 = mesh->m_vertices->getLocalPos(v3);
+        const auto& triangle_transform = compute_triangle_transform(pos1,pos2,pos3);
+        const auto& centroid = (pos1 + pos2 + pos3) / 3;
+
+        if (centroid.z() <= -0.0375)
+        {
+            int numpts = round(area * density);
+
+            if (numpts == 1)
+            {
+                m_sensors[triangle_idx].emplace_back(new Sensor());
+
+                // into the mesh
+                cVector3d startPos = transform*(centroid - 0.25*m_sensors[triangle_idx].back()->len*normal);
+                cVector3d endPos = transform*(centroid + 0.75*m_sensors[triangle_idx].back()->len*normal);
+                m_sensors[triangle_idx].back()->startPos = startPos.eigen();
+
+//                if (m_useVisualizer)
+//                {
+//                    m_rayViz.emplace_back(new cShapeLine(startPos, endPos));
+//                    m_world->addChild(m_rayViz.back());
+//                    m_rayViz.back()->m_colorPointA.setYellow();
+//                    m_rayViz.back()->m_colorPointB.setYellow();
+//                }
+            }
+
+            if (numpts > 1)
+            {
+                auto pts_pos = distributePointsInTriangle(pos1, pos2, pos3, numpts);
+
+                for (int r = 0; r < pts_pos.size(); r++)
+                {
+                    // into the mesh
+                    cVector3d startPos = transform*(pts_pos[r] - 0.25*m_sensors[triangle_idx].back()->len*normal);
+                    cVector3d endPos = transform*(pts_pos[r] + 0.75*m_sensors[triangle_idx].back()->len*normal);
+
+                    m_sensors[triangle_idx].emplace_back(new Sensor());
+                    m_sensors[triangle_idx].back()->startPos = startPos.eigen();
+
+//                    if (m_useVisualizer)
+//                    {
+//                        m_rayViz.emplace_back(new cShapeLine(startPos, endPos));
+//                        m_world->addChild(m_rayViz.back());
+//                        m_rayViz.back()->m_colorPointA.setYellow();
+//                        m_rayViz.back()->m_colorPointB.setYellow();
+//                    }
+                }
+            }
+        }
+    }
+
+    for (int i = 0 ; i < num_vertices; i++)
+    {
+        for (int triangle_idx = 0; triangle_idx < num_triangles; triangle_idx++) {
+            const auto &v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
+            const auto &v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
+            const auto &v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
+            if (i == v1 || i == v2 || i == v3)
+            {
+                if (i != v1)
+                    vertexNeighbors[i].insert(v1);
+                if (i != v2)
+                    vertexNeighbors[i].insert(v2);
+                if (i != v3)
+                    vertexNeighbors[i].insert(v3);
+            }
+        }
+    }
+
+    for (int i = 0 ; i < num_vertices; i++)
+    {
+        Vector3d normalAvg(0,0,0);
+        int div = 0;
+        for (auto triangle_idx : vertexNeighbors[i])
+        {
+             auto v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
+             auto v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
+             auto v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
+             auto normal = mesh->m_triangles->computeNormal(triangle_idx, true);
+            normalAvg += normal.eigen();
+            div++;
+        }
+        normalAvg /= div;
+    }
+
 }
