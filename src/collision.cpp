@@ -347,7 +347,6 @@ bool CollisionDetector::findCollisionsRigidRigid(const VectorXd& object1_start_p
                 1e-6,
                 t))
         {
-            flag = true;
             contacts.emplace_back(new Contact());
             contacts.back()->t = t;
             Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
@@ -459,4 +458,175 @@ bool CollisionDetector::findCollisionsDeformableDeformable(const VectorXd& objec
         }
     }
     return flag;
+}
+
+bool CollisionDetector::findCollisionsRigidDeformable(VectorXd& object1_start_,VectorXd& object1_end_,
+                                   const MatrixXi& object1_triangles, const MatrixXd& object2_start, const MatrixXd& object2_end,
+                                   const MatrixXi& object2_triangles,
+                                   vector<Contact*>& contacts)
+{
+    bool flag = false;
+
+    int numVertices = object1_start_.rows() / 3;
+    Map<MatrixXd> object1_start_temp(object1_start_.data(),  3,numVertices);
+    Map<MatrixXd> object1_end_temp(object1_end_.data(),  3,numVertices);
+    MatrixXd object1_start = object1_start_temp.transpose();
+    MatrixXd object1_end = object1_end_temp.transpose();
+
+    auto object1_aabb = buildAABB(object1_start, object1_end, object1_triangles);
+    auto object2_aabb = buildAABB(object2_start, object2_end, object2_triangles);
+
+    std::vector<Collision> potentialCollisions;
+
+    intersect(object1_aabb,object2_aabb,potentialCollisions);
+
+    set<pair<int,int>> left_triangles_right_vertices;
+    set<pair<int,int>> left_vertices_right_triangles;
+
+    for (const auto& it : potentialCollisions) {
+        int left_idx = it.collidingTriangle1;
+        int right_idx = it.collidingTriangle2;
+
+        left_triangles_right_vertices.insert(pair<int,int>(left_idx,object2_triangles(right_idx,0)));
+        left_triangles_right_vertices.insert(pair<int,int>(left_idx,object2_triangles(right_idx,1)));
+        left_triangles_right_vertices.insert(pair<int,int>(left_idx,object2_triangles(right_idx,2)));
+
+        left_vertices_right_triangles.insert(pair<int,int>(object1_triangles(left_idx,0),right_idx));
+        left_vertices_right_triangles.insert(pair<int,int>(object1_triangles(left_idx,1),right_idx));
+        left_vertices_right_triangles.insert(pair<int,int>(object1_triangles(left_idx,2),right_idx));
+    }
+
+
+    //////////////////////////////////////////////////////////
+    ///// HERE OBJECT 1 OWNS THE TRIANGLE ////////////////////
+    //////////////////////////////////////////////////////////
+
+    for (const auto& it : left_triangles_right_vertices) {
+        Vector3i face = object1_triangles.row(it.first);
+        int vidx = it.second;
+        double t;
+
+        Vector3d a  = object1_start.row(face(0)).transpose();
+        Vector3d b  = object1_start.row(face(1)).transpose();
+        Vector3d c  = object1_start.row(face(2)).transpose();
+        Vector3d v0 = object2_start.row(vidx).transpose();
+        Vector3d a0 = object1_start.row(face(0)).transpose();
+        Vector3d b0 = object1_start.row(face(1)).transpose();
+        Vector3d c0 = object1_start.row(face(2)).transpose();
+        Vector3d v1 = object2_end.row(vidx).transpose();
+        Vector3d a1 = object1_end.row(face(0)).transpose();
+        Vector3d b1 = object1_end.row(face(1)).transpose();
+        Vector3d c1 = object1_end.row(face(2)).transpose();
+
+        // TODO Implement Vertex-Face CTCD
+        if (CTCD::vertexFaceCTCD(
+                v0,a0,b0,c0,
+                v1,a1,b1,c1,
+                1e-6,
+                t))
+        {
+            flag = true;
+            contacts.emplace_back(new Contact());
+            contacts.back()->t = t;
+            Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
+            contacts.back()->n = n1;
+            contacts.back()->objectIdxA = 1;
+            contacts.back()->objectIdxB = 0;
+            contacts.back()->depth = ((v1 - a1).dot(n1));
+            // find the contacting point
+            Vector3d P = v1 - contacts.back()->depth * n1;
+            contacts.back()->contact_pt = P;
+            contacts.back()->contact_wrt_objectA = object2_start.row(vidx);
+            contacts.back()->contact_wrt_objectB = (a + b + c) / 3;
+            contacts.back()->compute_contact_basis();
+
+        }
+    }
+
+    //////////////////////////////////////////////////////////
+    ///// HERE OBJECT 2 OWNS THE TRIANGLE ////////////////////
+    //////////////////////////////////////////////////////////
+
+    for (const auto& it : left_vertices_right_triangles) {
+        flag = true;
+        Vector3i face = object2_triangles.row(it.second);
+        int vidx = it.first;
+
+        double t;
+
+        Vector3d a = object2_start.row(face(0)).transpose();
+        Vector3d b = object2_start.row(face(1)).transpose();
+        Vector3d c = object2_start.row(face(2)).transpose();
+        Vector3d v0 = object1_start.row(vidx).transpose();
+        Vector3d a0 = object2_start.row(face(0)).transpose();
+        Vector3d b0 = object2_start.row(face(1)).transpose();
+        Vector3d c0 = object2_start.row(face(2)).transpose();
+        Vector3d v1 = object1_end.row(vidx).transpose();
+        Vector3d a1 = object2_end.row(face(0)).transpose();
+        Vector3d b1 = object2_end.row(face(1)).transpose();
+        Vector3d c1 = object2_end.row(face(2)).transpose();
+
+        if (CTCD::vertexFaceCTCD(
+                v0,a0,b0,c0,
+                v1,a1,b1,c1,
+                1e-6,
+                t))
+        {
+            contacts.emplace_back(new Contact());
+            contacts.back()->t = t;
+            Vector3d n1 = ((b1 - a1).cross(c1 - a1)).normalized();
+            contacts.back()->n = n1;
+            contacts.back()->objectIdxA = 0;
+            contacts.back()->objectIdxB = 1;
+            contacts.back()->depth = (v1 - a1).dot(n1);
+
+            // find the contacting point
+            Vector3d P = v1 - contacts.back()->depth * n1;
+            contacts.back()->contact_pt = P;
+            contacts.back()->contact_wrt_objectA = object1_start.row(vidx);
+            contacts.back()->contact_wrt_objectB = (a + b + c) / 3;
+            contacts.back()->compute_contact_basis();
+
+        }
+    }
+    return flag;
+}
+
+bool CollisionDetector::findCollisionsBroadPhase(const Eigen::VectorXd &object1_start_position,
+                                                 const Eigen::VectorXd &object1_end_position,
+                                                 const Eigen::MatrixXd &object1_vertices,
+                                                 const Eigen::MatrixXi &object1_tris,
+                                                 const Eigen::VectorXd &object2_start_position,
+                                                 const Eigen::VectorXd &object2_end_position,
+                                                 const Eigen::MatrixXd &object2_vertices,
+                                                 const Eigen::MatrixXi &object2_tris, std::vector<Collision>& potentialCollisions)
+{
+    // object1 vertices
+    VectorXd object1_pos_start = object1_start_position.block<3,1>(0,0);
+    VectorXd object1_pos_end = object1_end_position.block<3,1>(0,0);
+    Quaterniond object1_rot_start(object1_start_position(3),object1_start_position(4),object1_start_position(5),object1_start_position(6));
+    Quaterniond object1_rot_end(object1_end_position(3),object1_end_position(4),object1_end_position(5),object1_end_position(6));
+    MatrixXd object1_start, object1_end;
+    object1_start = object1_vertices; object1_end = object1_vertices;
+    applyQuaternionRotation(object1_start,object1_rot_start);
+    applyQuaternionRotation(object1_end,object1_rot_end);
+    object1_start.rowwise() += object1_pos_start.transpose();
+    object1_end.rowwise() += object1_pos_end.transpose();
+
+    // object2 vertices
+    VectorXd object2_pos_start = object2_start_position.block<3,1>(0,0);
+    VectorXd object2_pos_end = object2_end_position.block<3,1>(0,0);
+    Quaterniond object2_rot_start(object2_start_position(3),object2_start_position(4),object2_start_position(5),object2_start_position(6));
+    Quaterniond object2_rot_end(object2_end_position(3),object2_end_position(4),object2_end_position(5),object2_end_position(6));
+    MatrixXd object2_start, object2_end;
+    object2_start = object2_vertices; object2_end = object2_vertices;
+    applyQuaternionRotation(object2_start,object2_rot_start);
+    applyQuaternionRotation(object2_end,object2_rot_end);
+    object2_start.rowwise() += object2_pos_start.transpose();
+    object2_end.rowwise() += object2_pos_end.transpose();
+
+    auto object1_aabb = buildAABB(object1_start, object1_end, object1_tris);
+    auto object2_aabb = buildAABB(object2_start, object2_end, object2_tris);
+
+    intersect(object1_aabb,object2_aabb,potentialCollisions);
 }

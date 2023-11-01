@@ -12,7 +12,7 @@ struct Settings
 {
     // Haptic Settings
     double scaleFactor = 1.;
-    double K = 1000; double B = 100;
+    double K = 200; double B = 100;
     // Simulation settings
     double linearTolerance = 1e-6;
     double newtonTolerance = 1e-6;

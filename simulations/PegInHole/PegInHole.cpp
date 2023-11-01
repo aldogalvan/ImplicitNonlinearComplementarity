@@ -136,7 +136,6 @@ void PegInHole::initialize()
     peg->getMesh(0)->m_material->setBlue(); peg->getMesh(0)->m_material->setShininess(0.5);
     m_world->addChild(peg);
     peg->compute_inertia_matrix();
-    peg->setWireMode(true);
 
     cout << "Peg Vertices = " << peg->getNumVertices() << endl;
 
@@ -150,7 +149,6 @@ void PegInHole::initialize()
     block->compute_inertia_matrix();
     block->set_local_pos(Vector3d(0,0,-0.45));
     block->computeAllNormals();
-    block->setWireMode(true);
 
     cout << "Block Vertices = " << block->getNumVertices() << endl;
 }

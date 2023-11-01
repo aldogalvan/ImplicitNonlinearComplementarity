@@ -11,6 +11,7 @@
 using namespace Eigen;
 using namespace std;
 
+
 class CollisionDetector
 {
 public:
@@ -46,11 +47,20 @@ public:
                                          const VectorXd& object2_start_vertices, const VectorXd& object2_end_vertices,
                                          const MatrixXi& object2_tris, const MatrixXi& object2_tets,
                                          vector<Contact*>& collisions);
-    static bool findCollisionsRigidDeformable(const VectorXd& object1_start_vertices, const VectorXd& object1_end_vertices,
-                                                   const MatrixXi& object1_tris, const MatrixXi& object1_tets,
-                                                   const VectorXd& object2_start_vertices, const VectorXd& object2_end_vertices,
-                                                   const MatrixXi& object2_tris, const MatrixXi& object2_tets,
+
+    static bool findCollisionsRigidDeformable(VectorXd& object1_start_vertices, VectorXd& object1_end_vertices,
+                                                   const MatrixXi& object1_tris, const MatrixXd& object2_start_vertices, const MatrixXd& object2_end_vertices,
+                                                   const MatrixXi& object2_tris,
                                                    vector<Contact*>& collisions);
+
+    static bool findCollisionsBroadPhase(const Eigen::VectorXd &object1_start_position,
+                                         const Eigen::VectorXd &object1_end_position,
+                                         const Eigen::MatrixXd &object1_vertices,
+                                         const Eigen::MatrixXi &object1_tris,
+                                         const Eigen::VectorXd &object2_start_position,
+                                         const Eigen::VectorXd &object2_end_position,
+                                         const Eigen::MatrixXd &object2_vertices,
+                                         const Eigen::MatrixXi &object2_tris, std::vector<Collision>& potentialCollisions);
 
     // the objects in this detector
     vector<RigidObject*> m_objects;

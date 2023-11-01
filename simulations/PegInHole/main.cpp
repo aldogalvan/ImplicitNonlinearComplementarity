@@ -263,7 +263,7 @@ int main(int argc, char* argv[])
     world->setShowFrame(true);
 
     // set the background color of the environment
-    world->m_backgroundColor.setBlack();
+    world->m_backgroundColor.setWhite();
 
     // create a camera and insert it into the virtual world
     camera = new cCamera(world);
@@ -615,7 +615,7 @@ void updateHaptics(void)
 
     cPrecisionClock clock;
 
-    // main haptic simulation loop
+    // main haptic simulation loopf
     while (simulationRunning) {
 
         clock.stop();

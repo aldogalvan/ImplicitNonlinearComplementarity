@@ -4,6 +4,21 @@
 #include <igl/readSTL.h>
 #include <igl/readOFF.h>
 #include <igl/centroid.h>
+#include <random>
+
+
+void generateRandomPastelColor(double& red, double& green, double& blue) {
+    // Create a random number generator
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<double> distribution(0.5, 1.0);  // Limit to light shades in the [0.7, 1.0] range
+
+    // Generate random values for the RGB components
+    red = distribution(gen);
+    green = distribution(gen);
+    blue = distribution(gen);
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 ///////////////////////////////////// BASE OBJECT /////////////////////////////////////////////
@@ -283,7 +298,7 @@ bool DeformableObject::create_tetrahedral_mesh(char* filename)
     cMesh* mesh = this->getMesh(0);
 
     // TetGen switches
-    char TETGEN_SWITCHES[] = "pq1.414a0.02";
+    char TETGEN_SWITCHES[] = "pq1.414a0.2";
 
     if (input.load_off(filename))
     {
@@ -351,10 +366,26 @@ bool DeformableObject::create_tetrahedral_mesh(char* filename)
         }
 
         // set the vertex positions
-        x = flattenMatrix(m_vertices); x_last = x;
-        xdot.resize(m_numVerts * 3); xdot.setZero();
-        f.resize(m_numVerts * 3); f.setZero();
-        fc.resize(m_numVerts *3); fc.setZero();
+        x = flattenMatrix(m_vertices); x_tilde = x;
+        xdot = VectorXd::Zero(m_numVerts*3);
+        xdot_tilde = VectorXd::Zero(m_numVerts*3);
+        f = VectorXd::Zero(m_numVerts*3);
+        fc = VectorXd::Zero(m_numVerts*3);
+
+        // creates the mass matrices
+
+        M = MatrixXd::Zero(m_numVerts*3,m_numVerts*3);
+        M_inv = MatrixXd::Zero(m_numVerts*3,m_numVerts*3);
+        M_sparse = SparseMatrix<double>(m_numVerts*3,m_numVerts*3);
+        M_inv_sparse = SparseMatrix<double>(m_numVerts*3,m_numVerts*3);
+        for (int i = 0 ; i < 3*m_numVerts; i++)
+        {
+            M_sparse.insert(i,i) = mass / m_numVerts;
+            M_inv_sparse.insert(i,i) = m_numVerts / mass;
+            M(i,i) = mass/m_numVerts;
+            M_inv(i,i) = m_numVerts / mass;
+        }
+
 
         return true;
     }
@@ -374,15 +405,26 @@ void DeformableObject::update_mesh_position()
     }
 }
 
-MatrixXd DeformableObject::mass_matrix()
+SparseMatrix<double>& DeformableObject::sparse_mass_matrix()
 {
-    return mass*MatrixXd::Identity(3*m_numVerts,3*m_numVerts) / m_numVerts;
+    return M_sparse;
 }
 
-MatrixXd DeformableObject::inverse_mass_matrix()
+SparseMatrix<double>& DeformableObject::sparse_inverse_mass_matrix()
 {
-    return m_numVerts*MatrixXd::Identity(3*m_numVerts,3*m_numVerts) / mass;
+    return M_inv_sparse;
 }
+
+MatrixXd& DeformableObject::mass_matrix()
+{
+    return M;
+}
+
+MatrixXd& DeformableObject::inverse_mass_matrix()
+{
+    return M_inv;
+}
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -403,96 +445,120 @@ void PenaltyObject::wrapMesh(void)
 
     for (int triangle_idx = 0; triangle_idx < num_triangles; triangle_idx++)
     {
-        const auto& v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
-        const auto& v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
-        const auto& v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
-        const auto& area = mesh->m_triangles->computeArea(triangle_idx);
-        const auto& normal = mesh->m_triangles->computeNormal(triangle_idx, true);
-        const auto& pos1 = mesh->m_vertices->getLocalPos(v1);
-        const auto& pos2 = mesh->m_vertices->getLocalPos(v2);
-        const auto& pos3 = mesh->m_vertices->getLocalPos(v3);
-        const auto& triangle_transform = compute_triangle_transform(pos1,pos2,pos3);
-        const auto& centroid = (pos1 + pos2 + pos3) / 3;
+         auto v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
+         auto v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
+         auto v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
+         auto area = mesh->m_triangles->computeArea(triangle_idx);
+         auto normal = mesh->m_triangles->computeNormal(triangle_idx, true);
+         auto pos1 = mesh->m_vertices->getLocalPos(v1);
+         auto pos2 = mesh->m_vertices->getLocalPos(v2);
+         auto pos3 = mesh->m_vertices->getLocalPos(v3);
+         auto localTransform = this->getLocalTransform();
+         auto centroid = (pos1 + pos2 + pos3) / 3;
+         int numpts = round(area * density);
 
-        if (centroid.z() <= -0.0375)
+        double r,g,b;
+        generateRandomPastelColor(r,g,b);
+
+        if (numpts == 1)
         {
-            int numpts = round(area * density);
+            m_sensors[triangle_idx].emplace_back(new Sensor());
 
-            if (numpts == 1)
+            // into the mesh
+            cVector3d startPos = centroid - m_sensors[triangle_idx].back()->len*normal;
+            cVector3d endPos = centroid ;//+ 0.75*m_sensors[triangle_idx].back()->len*normal;
+            m_sensors[triangle_idx].back()->startPos = startPos.eigen();
+
+            if (visualizeSensors)
+            {
+                m_rayViz.emplace_back(new cShapeLine(startPos, endPos));
+                this->addChild(m_rayViz.back());
+
+                m_rayViz.back()->m_colorPointA.set(r,g,b);
+                m_rayViz.back()->m_colorPointB.set(r,g,b);
+            }
+        }
+
+        if (numpts > 1)
+        {
+            auto pts_pos = distributePointsInTriangle(pos1, pos2, pos3, numpts);
+
+            for (int r = 0; r < pts_pos.size(); r++)
             {
                 m_sensors[triangle_idx].emplace_back(new Sensor());
+                m_sensors[triangle_idx].back()->m_parent = this;
 
                 // into the mesh
-                cVector3d startPos = transform*(centroid - 0.25*m_sensors[triangle_idx].back()->len*normal);
-                cVector3d endPos = transform*(centroid + 0.75*m_sensors[triangle_idx].back()->len*normal);
+                cVector3d startPos = pts_pos[r] - 0.25*m_sensors[triangle_idx].back()->len*normal;
+                cVector3d endPos = pts_pos[r] + 0.75*m_sensors[triangle_idx].back()->len*normal;
+
                 m_sensors[triangle_idx].back()->startPos = startPos.eigen();
+                m_sensors[triangle_idx].back()->normal = normal.eigen();
 
-//                if (m_useVisualizer)
-//                {
-//                    m_rayViz.emplace_back(new cShapeLine(startPos, endPos));
-//                    m_world->addChild(m_rayViz.back());
-//                    m_rayViz.back()->m_colorPointA.setYellow();
-//                    m_rayViz.back()->m_colorPointB.setYellow();
-//                }
-            }
-
-            if (numpts > 1)
-            {
-                auto pts_pos = distributePointsInTriangle(pos1, pos2, pos3, numpts);
-
-                for (int r = 0; r < pts_pos.size(); r++)
+                if (visualizeSensors)
                 {
-                    // into the mesh
-                    cVector3d startPos = transform*(pts_pos[r] - 0.25*m_sensors[triangle_idx].back()->len*normal);
-                    cVector3d endPos = transform*(pts_pos[r] + 0.75*m_sensors[triangle_idx].back()->len*normal);
-
-                    m_sensors[triangle_idx].emplace_back(new Sensor());
-                    m_sensors[triangle_idx].back()->startPos = startPos.eigen();
-
-//                    if (m_useVisualizer)
-//                    {
-//                        m_rayViz.emplace_back(new cShapeLine(startPos, endPos));
-//                        m_world->addChild(m_rayViz.back());
-//                        m_rayViz.back()->m_colorPointA.setYellow();
-//                        m_rayViz.back()->m_colorPointB.setYellow();
-//                    }
+                    m_rayViz.emplace_back(new cShapeLine(startPos, endPos));
+                    this->m_parent->addChild(m_rayViz.back());
+                    m_rayViz.back()->setLineWidth(2);
+                    m_rayViz.back()->m_colorPointA.set(r,g,b);
+                    m_rayViz.back()->m_colorPointB.set(r,g,b);
                 }
             }
         }
+
     }
 
-    for (int i = 0 ; i < num_vertices; i++)
-    {
-        for (int triangle_idx = 0; triangle_idx < num_triangles; triangle_idx++) {
-            const auto &v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
-            const auto &v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
-            const auto &v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
-            if (i == v1 || i == v2 || i == v3)
-            {
-                if (i != v1)
-                    vertexNeighbors[i].insert(v1);
-                if (i != v2)
-                    vertexNeighbors[i].insert(v2);
-                if (i != v3)
-                    vertexNeighbors[i].insert(v3);
-            }
-        }
-    }
+//    for (int i = 0 ; i < num_vertices; i++)
+//    {
+//        for (int triangle_idx = 0; triangle_idx < num_triangles; triangle_idx++) {
+//            const auto &v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
+//            const auto &v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
+//            const auto &v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
+//            if (i == v1 || i == v2 || i == v3)
+//            {
+//                if (i != v1)
+//                    vertexNeighbors[i].insert(v1);
+//                if (i != v2)
+//                    vertexNeighbors[i].insert(v2);
+//                if (i != v3)
+//                    vertexNeighbors[i].insert(v3);
+//            }
+//        }
+//    }
+//
+//    for (int i = 0 ; i < num_vertices; i++)
+//    {
+//        Vector3d normalAvg(0,0,0);
+//        int div = 0;
+//        for (auto triangle_idx : vertexNeighbors[i])
+//        {
+//            auto v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
+//            auto v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
+//            auto v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
+//            auto normal = mesh->m_triangles->computeNormal(triangle_idx, true);
+//            normalAvg += normal.eigen();
+//            div++;
+//        }
+//        normalAvg /= div;
+//    }
 
-    for (int i = 0 ; i < num_vertices; i++)
+}
+
+void PenaltyObject::updateSensors()
+{
+    Affine3d transform;
+    transform.translation() = this->x;
+    transform.linear() = this->q.toRotationMatrix();
+    int i = 0;
+
+    for (auto triangle_sensors : m_sensors)
     {
-        Vector3d normalAvg(0,0,0);
-        int div = 0;
-        for (auto triangle_idx : vertexNeighbors[i])
+        for (auto sensor : triangle_sensors)
         {
-             auto v1 = mesh->m_triangles->getVertexIndex0(triangle_idx);
-             auto v2 = mesh->m_triangles->getVertexIndex1(triangle_idx);
-             auto v3 = mesh->m_triangles->getVertexIndex2(triangle_idx);
-             auto normal = mesh->m_triangles->computeNormal(triangle_idx, true);
-            normalAvg += normal.eigen();
-            div++;
+            sensor->globalStartPos = transform*sensor->startPos;
+            sensor->globalNormal = transform*sensor->normal;
+            m_rayViz[i]->setLocalPos(sensor->globalStartPos);
+            i++;
         }
-        normalAvg /= div;
     }
-
 }

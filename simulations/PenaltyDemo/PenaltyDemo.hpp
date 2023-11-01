@@ -6,8 +6,19 @@
 #include "objects.hpp"
 #include "collision.hpp"
 #include "contact.hpp"
+#include <fstream>
+#include <Eigen/Dense>
 
 using namespace std;
+
+struct CollisionResult {
+    bool collision;
+    double distance; // the penetration distance
+    Eigen::Vector3d p0; // absolute contact point
+    Vector3d normal; // the normal of the contact
+    Sensor* sensor; // pointer to the sensor
+
+};
 
 class PenaltyDemo
 {
@@ -17,15 +28,6 @@ public:
     {
         m_devicePtr = device; m_world = world;
         initialize();
-        vis = new cMultiMesh();
-        vis->loadFromFile("/home/aldo/ImplicitNonlinearComplementarity/resources/PegInHole/peg.obj");
-        vis->m_material->setYellowLightGoldenrod();
-        vis->scale(0.025);
-        vis->scale(0.99);
-        vis->setWireMode(true);
-        cout << "center = " << -vis->getMesh(0)->getCenterOfMass() << endl;
-        vis->getMesh(0)->offsetVertices(-vis->getMesh(0)->getCenterOfMass());
-        world->addChild(vis);
     }
 
     ~PenaltyDemo()
@@ -34,33 +36,37 @@ public:
     }
 
     void initialize(void);
-    void step(double dt);
-    void updateGraphics();
+    void step(double dt);    void updateGraphics();
     void updateHaptics(Vector3d& f);
-    VectorXd computeResidual(const VectorXd&, const VectorXd &,const VectorXd &, const VectorXd &,
-                             const VectorXd&, const VectorXd&, const MatrixXd &,
-                             const vector<Contact*>&, double);
-    void backtrackingLineSearch(double &, double &, const VectorXd &, const VectorXd &, const VectorXd &,
-                                const VectorXd &,const VectorXd&, const VectorXd&, const MatrixXd &,
-                                const vector<Contact*>&, double, double, double, int);
+    void linearizedBDF1Solver(double, vector<Collision>);
+    void BDF1Solver(double h, vector<Collision>);
+    void linearizedBDF2Solver(double h, vector<Collision>);
+    void BDF2Solver(double h,vector<Collision>);
 
+    vector<CollisionResult> computeCollisions(vector<Collision> potentialCollisions);
     cGenericHapticDevicePtr m_devicePtr; // the pointer to the haptic device
     cWorld* m_world;
-    GodObject* peg;
-    RigidObject* block;
-    cMultiMesh* vis;
-
+    PenaltyGodObject* spoon;
+    PenaltyObject* mug;
 
     // Simulation constants
-    int numNewtonIt = 10;
-    int backtrackingIt = 10;
-    double alpha = 0.5; double beta = 0.2;
+    double simTime = 0;
+    int maxIt = 20;
+    bool useContact = 1;
 
     // System submatrices
     MatrixXd C_h; // compliance matrix used for haptic feedback
     MatrixXd J; // the constraint jacobian
     MatrixXd C; // the compliance matrix
     MatrixXd M; // the mass matrix
+    bool m_recordTrajectory = false;
+    bool m_readTrajectory = false;
+    bool m_recordData = false;
+    double h_minus_1 = 0.001;
+    std::ifstream* inputFile;
+    std::ofstream* outputFile;
+    std::ofstream* dataFile;
+
 
 };
 

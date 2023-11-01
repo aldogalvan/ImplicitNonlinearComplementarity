@@ -42,6 +42,7 @@ include_directories(external/libigl/include)
 file(GLOB_RECURSE IMPLICIT_LCP_SOURCES  src/*.cpp src/*.hpp external/tetgen/*.cpp external/tetgen/*.h)
 add_library(ImplicitLCP ${IMPLICIT_LCP_SOURCES})
 add_definitions(-DTETLIBRARY)
+find_package(OpenMP)
 
 target_link_libraries(ImplicitLCP PUBLIC
         ${GNUPLOT_LIBRARIES}
@@ -49,7 +50,8 @@ target_link_libraries(ImplicitLCP PUBLIC
         ${CHAI3D_LIBRARIES}
         ${GLFW_LIBRARIES}
         Eigen3::Eigen
-        drake::drake)
+        drake::drake
+        OpenMP::OpenMP_CXX)
 
 # Add the matplotlib-cpp library as an external project
 add_subdirectory(external/matplotlib-cpp)
@@ -59,14 +61,16 @@ include_directories("/usr/include/python3.8")
 
 
 add_executable(PegInHole simulations/PegInHole/main.cpp simulations/PegInHole/PegInHole.cpp)
-add_executable(RigidBodyDemo simulations/RigidBodyDemo/main.cpp simulations/RigidBodyDemo/RigidBodyDemo.cpp)
-add_executable(DeformableBodyDemo simulations/DeformableBodyDemo/main.cpp simulations/DeformableBodyDemo/DeformableBodyDemo.cpp)
-add_executable(HapticDemo simulations/HapticDemo/main.cpp simulations/HapticDemo/HapticDemo.cpp)
+#add_executable(RigidBodyDemo simulations/RigidBodyDemo/main.cpp simulations/RigidBodyDemo/RigidBodyDemo.cpp)
+#add_executable(DeformableBodyDemo simulations/DeformableBodyDemo/main.cpp simulations/DeformableBodyDemo/DeformableBodyDemo.cpp)
+#add_executable(HapticDemo simulations/HapticDemo/main.cpp simulations/HapticDemo/HapticDemo.cpp)
+add_executable(PenaltyDemo simulations/PenaltyDemo/main.cpp simulations/PenaltyDemo/PenaltyDemo.cpp)
 
 target_link_libraries(PegInHole PUBLIC ImplicitLCP)
-target_link_libraries(RigidBodyDemo PUBLIC ImplicitLCP matplotlib_cpp)
-target_link_libraries(DeformableBodyDemo PUBLIC ImplicitLCP)
-target_link_libraries(HapticDemo PUBLIC ImplicitLCP)
+#target_link_libraries(RigidBodyDemo PUBLIC ImplicitLCP matplotlib_cpp)
+#target_link_libraries(DeformableBodyDemo PUBLIC ImplicitLCP)
+#target_link_libraries(HapticDemo PUBLIC ImplicitLCP)
+target_link_libraries(PenaltyDemo PUBLIC ImplicitLCP)
 
 
 

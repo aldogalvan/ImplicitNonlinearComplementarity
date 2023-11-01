@@ -260,10 +260,10 @@ int main(int argc, char* argv[])
     world = new cWorld();
 
     // set the world to show the for
-    world->setShowFrame(true);
+    world->setShowFrame(false);
 
     // set the background color of the environment
-    world->m_backgroundColor.setBlack();
+    world->m_backgroundColor.setWhite();
 
     // create a camera and insert it into the virtual world
     camera = new cCamera(world);
@@ -288,7 +288,7 @@ int main(int argc, char* argv[])
     camera->setMirrorVertical(mirroredDisplay);
 
     // create a directional light source
-    light = new cSpotLight(world);
+    light = new cDirectionalLight(world);
 
     // insert light source inside world
     world->addChild(light);
@@ -297,8 +297,8 @@ int main(int argc, char* argv[])
     light->setEnabled(true);
 
     // define direction of light beam
-    light->setDir(0, 0.0, -1.0);
-    light->setLocalPos(0,0,5);
+    light->setDir(0, -1, -1.0);
+    light->setLocalPos(0,3,5);
 
 
     //--------------------------------------------------------------------------

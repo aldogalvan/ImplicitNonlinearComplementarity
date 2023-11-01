@@ -1,354 +1,1103 @@
 
 #include "PenaltyDemo.hpp"
 
+struct TrajectoryResult {
+    double position;
+    double velocity;
+};
 
-inline double W_fischer(const MatrixXd& D, const VectorXd& qdot, const VectorXd& lambda_f,
-                        const double& r, const double& mu, const double& lambda_n)
+CollisionResult checkSensorCollision(Sensor* sensor) {
+    CollisionResult result;
+
+    // Check if the start and end positions of the sensor cross the z = 0 plane.
+    if ((sensor->globalStartPos.z() >= 0 && sensor->globalNormal.z() <= 0) ||
+        (sensor->globalStartPos.z() <= 0 && sensor->globalNormal.z() >= 0)) {
+        result.collision = true;
+        result.distance = fabs(sensor->globalStartPos.z());
+        result.p0 = Eigen::Vector3d(sensor->globalStartPos.x(), sensor->globalStartPos.y(), 0.0);
+        result.normal = Vector3d(0,0,1);
+        result.sensor = sensor;
+    } else {
+        result.collision = false;
+        result.distance = 0.0;
+        result.p0 = Eigen::Vector3d::Zero();
+        result.normal = Vector3d{0.0, 0.0, 0.0};
+        result.sensor = nullptr;
+    }
+
+    return result;
+}
+
+TrajectoryResult sinusoidalTrajectory(double amplitude, double frequency, double phase, double timeOffset, double time) {
+    TrajectoryResult result;
+
+    // Calculate position as a function of time
+    result.position = amplitude * sin(2 * M_PI * frequency * (time - timeOffset) + phase);
+
+    // Calculate velocity as the derivative of position
+    // Using the derivative of sin(u) = cos(u) * du/dt
+    result.velocity = 2 * M_PI * amplitude * frequency * cos(2 * M_PI * frequency * (time - timeOffset) + phase);
+
+    return result;
+}
+
+MatrixXd Q(Quaterniond q)
 {
-    double ret = 1;
-    if (lambda_n * mu > 0)
-    {
-        ret *= r*(sqrt((D.transpose()*qdot).squaredNorm()+pow(r,2)*pow((mu*lambda_n - lambda_f.norm()),2)) - r*(mu*lambda_n - lambda_f.norm()))/
-               ((D.transpose()*qdot).squaredNorm()+r*mu*lambda_n-sqrt((D.transpose()*qdot).squaredNorm()+pow(r,2)*pow((mu*lambda_n - lambda_f.norm()),2)));
-    }
-    if (isnan(ret))
-        ret = 0;
-
-    return ret;
+    MatrixXd Q = MatrixXd::Zero(4,3);
+    Q(0,0) = 0.5*q.w();
+    Q(0,1) = 0.5*q.z();
+    Q(0,2) = -0.5*q.y();
+    Q(1,0) = -0.5*q.z();
+    Q(1,1) = 0.5*q.w();
+    Q(1,2) = 0.5*q.x();
+    Q(2,0) = 0.5*q.y();
+    Q(2,1) = -0.5*q.x();
+    Q(2,2) = 0.5*q.w();
+    Q(3,0) = -0.5*q.x();
+    Q(3,1) = -0.5*q.y();
+    Q(3,2) = -0.5*q.z();
+    return Q;
 }
-
-inline double fischer_partial_a(const double& a, const double& b)
+MatrixXd pQpx()
 {
-    assert(!isnan(a) && !isnan(b));
-    double ret;
-    if (abs(a) < 1e-12 && abs(b) < 1e-12)
-    {
-        ret = 0;
-    }
-    else
-    {
-        ret = 1 - (a/sqrt(pow(a,2) + pow(b,2)));
-    }
-    return ret;
+    MatrixXd ret(4,3);
+    ret(1,2) = 1;
+    ret(2,1) = -1;
+    ret(3,0) = -1;
+    return 0.5*ret;
 }
 
-inline double fischer_partial_b(const double& a, const double& b)
+MatrixXd pQpy()
 {
-    assert(!isnan(a) && !isnan(b));
-    double ret;
-    if (abs(a) < 1e-12 && abs(b) < 1e-12)
-    {
-        ret = 1;
-    }
-    else
-    {
-        ret = 1 - (b/sqrt(pow(a,2) + pow(b,2)));
-    }
-    return ret;
+    MatrixXd ret(4,3);
+    ret(0,2) = -1;
+    ret(2,0) = 1;
+    ret(3,1) = -1;
+    return 0.5*ret;
 }
 
-inline double fischer(double C_n, double lambda_n) {
-    return  C_n + lambda_n - sqrt(C_n * C_n + lambda_n * lambda_n) ;
+MatrixXd pQpz()
+{
+    MatrixXd ret(4,3);
+    ret(0,1) = 1;
+    ret(1,0) = -1;
+    ret(3,2) = -1;
+    return 0.5*ret;
 }
 
-VectorXd PenaltyDemo::computeResidual(const VectorXd &x, const VectorXd &u,
-                                    const VectorXd &delta_u, const VectorXd &u_tilde,
-                                    const VectorXd& lambda, const VectorXd& delta_lambda, const MatrixXd &M_tilde,
-                                    const vector<Contact*>& contacts, double dt) {
-    int num_contacts = contacts.size();
-    VectorXd r(3 + lambda.rows());
-    MatrixXd J_n(num_contacts,3);
-    MatrixXd J_f(2*num_contacts,3);
-    VectorXd lambda_n = lambda.head(num_contacts);
-//    VectorXd lambda_f = lambda.tail(2*num_contacts);
+MatrixXd pQpw()
+{
+    MatrixXd ret(4,3);
+    ret(0,0) = 1;
+    ret(1,1) = 1;
+    ret(2,2) = 1;
+    return 0.5*ret;
+}
 
-    for (int cidx = 0 ; cidx < num_contacts; cidx ++)
-    {
-        Contact* contact = contacts[cidx];
+MatrixXd pRpx(Quaterniond& q)
+{
+    MatrixXd ret(3,3);
+    ret(0,0) = q.x(); ret(0,1) = q.y(); ret(0,2) = q.z();
+    ret(1,0) = q.y(); ret(1,1) = -q.x(); ret(1,2) = -q.w();
+    ret(2,0) = q.z(); ret(2,1) = q.w(); ret(2,2) = -q.x();
+    return 2*ret;
+}
 
-        // normal contact constraints
-        double lambda_normal = lambda_n(cidx);
-        Vector3d n = contact->n_t_b.col(0);
-        double C_n;
-        if (contact->objectIdxB == -1)
-        {
-            C_n = -n.dot((contact->contact_wrt_objectB + block->getLocalPos().eigen()) - (contact->contact_wrt_objectA + x));
+MatrixXd pRpy(Quaterniond& q)
+{
+    MatrixXd ret(3,3);
+    ret(0,0) = -q.y(); ret(0,1) = q.x(); ret(0,2) = q.w();
+    ret(1,0) = q.x(); ret(1,1) = q.y(); ret(1,2) = q.z();
+    ret(2,0) = -q.w(); ret(2,1) = q.z(); ret(2,2) = -q.y();
+    return 2*ret;
+}
+
+MatrixXd pRpz(Quaterniond& q)
+{
+    MatrixXd ret(3,3);
+    ret(0,0) = -q.z(); ret(0,1) = -q.w(); ret(0,2) = q.x();
+    ret(1,0) = q.w(); ret(1,1) = -q.z(); ret(1,2) = q.y();
+    ret(2,0) = q.x(); ret(2,1) = q.y(); ret(2,2) = q.z();
+    return 2*ret;
+}
+
+MatrixXd pRpw(Quaterniond& q)
+{
+    MatrixXd ret(3,3);
+    ret(0,0) = q.w(); ret(0,1) = -q.z(); ret(0,2) = q.y();
+    ret(1,0) = q.z(); ret(1,1) = q.w(); ret(1,2) = -q.x();
+    ret(2,0) = -q.y(); ret(2,1) = q.x(); ret(2,2) = q.w();
+    return 2*ret;
+}
+
+// Function to check collision between a ray and a triangle defined by its vertices.
+CollisionResult checkRayTriangleCollision(const Sensor& ray, const Eigen::Vector3d& vertexA,
+                                          const Eigen::Vector3d& vertexB, const Eigen::Vector3d& vertexC) {
+    CollisionResult result;
+
+    // Calculate the vectors for the two edges of the triangle.
+    Eigen::Vector3d edge1 = vertexB - vertexA;
+    Eigen::Vector3d edge2 = vertexC - vertexA;
+
+    // Calculate the normal to the triangle.
+    Eigen::Vector3d normal = edge1.cross(edge2);
+    normal.normalize();
+
+    // Calculate the direction vector of the ray.
+    Eigen::Vector3d dir = ray.normal;
+    dir.normalize();
+
+    // Calculate the vector from the ray's origin to one of the triangle's vertices.
+    Eigen::Vector3d h = ray.startPos - vertexA;
+
+    // Calculate the determinant to determine if the ray and triangle are parallel.
+    double a = edge1.dot(dir.cross(edge2));
+    if (a > -1e-6 && a < 1e-6) {
+        result.collision = false;  // Ray and triangle are parallel.
+        return result;
+    }
+
+    // Calculate parameters for barycentric coordinates.
+    double f = 1.0 / a;
+    double u = f * h.dot(dir.cross(edge2));
+    double v = f * dir.dot(h.cross(edge1));
+
+    // Check if the intersection point is within the triangle.
+    if (u >= 0.0 && v >= 0.0 && u + v <= 1.0) {
+        // Calculate the distance to the intersection point along the ray.
+        double t = f * edge2.dot(h);
+
+        // Check if the intersection point is within the ray's length.
+        if (t >= 0.0 && t <= ray.len) {
+            result.collision = true;
+            result.distance = t;
+            result.p0 = vertexA + u * edge1 + v * edge2;
         }
-        else if (contact->objectIdxB == 0)
-        {
-            C_n = -n.dot((contact->contact_wrt_objectB + x) - (contact->contact_wrt_objectA + block->getLocalPos().eigen()));
-        }
-
-        VectorXd pphin_pq = fischer_partial_a(C_n,lambda_normal)*n;
-        J_n.row(cidx) = pphin_pq.transpose();
-        r(3 + cidx) = fischer(C_n,lambda_normal);
-
-        // friction contact constraints
-//                double r = 1; double mu = 0.5;
-//                Vector2d lambda_friction = lambda.block<2,1>(3*cidx+1,0);
-//                Matrix<double,3,2> D = contact->n_t_b.block<3,2>(0,1);
-//                MatrixXd pphif_pqdot = D;
-//                double W_f = W_fischer(D,u,lambda_friction,r,mu,lambda_normal);
-//                MatrixXd pphif_plambda = W_f*Matrix2d::Identity();
-//                MatrixXd phi_friction = D.transpose()*u + W_f*lambda_friction;
-//                J.block<2,3>(3*cidx+1,0) = pphif_pqdot.transpose();
-//                C.block<2,2>(3*cidx + 1, 3*cidx + 1) = pphif_plambda / dt;
     }
-    r.block<3,1>(0,0) = M_tilde*(u - u_tilde)/dt + J_n.transpose()*lambda_n;
-
-    return r;
-}
-
-void PenaltyDemo::backtrackingLineSearch(double &t, double &err,
-                                       const VectorXd &x, const VectorXd &u,
-                                       const VectorXd &u_tilde, const VectorXd &delta_u,
-                                       const VectorXd& lambda, const VectorXd& delta_lambda, const MatrixXd &M_tilde,
-                                       const vector<Contact*>& contacts, double dt, double alpha, double beta, int max_iter) {
-//    VectorXd grad_err = delta_lambda_n;
-//    double err_k;
-//
-//    for (int k = 0; k < max_iter; ++k) {
-//        VectorXd lambda_n_k = lambda_n + t * delta_lambda_n;
-//        VectorXd u_k = u + t * delta_u;
-//        VectorXd x_k = x + u * dt;
-//        VectorXd r = computeResidual(x_k, u_k, u_tilde, lambda_n_k, M_tilde, colInfo, dt);
-//        err_k = 0.5 * r.dot(r);
-//
-//        // Perform Armijo condition to check if we have sufficient decrease
-//        if (err_k <= err + beta * t * grad_err.dot(delta_lambda_n)) {
-//            break;
-//        }
-//
-//        t = alpha * t;
-//    }
-//
-//    err = err_k;
 }
 
 void PenaltyDemo::initialize()
 {
     // create the meshes
-//    peg = new GodObject(m_devicePtr,0,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/RigidBodyDemo/cube.obj");
-//    peg->scaleMesh(2);
-    peg = new GodObject(m_devicePtr,0,"/home/aldo/ImplicitNonlinearComplementarity/resources/PegInHole/peg.obj");
-    peg->scaleMesh(0.025);
-    peg->scaleMesh(0.99);
-    peg->getMesh(0)->m_material->setBlue(); peg->getMesh(0)->m_material->setShininess(0.5);
-    m_world->addChild(peg);
-    peg->compute_inertia_matrix();
-    peg->setWireMode(true);
+    spoon = new PenaltyGodObject(m_devicePtr,true,0,"/home/aldo/ImplicitNonlinearComplementarity/resources/RigidBodyDemo/cube.obj");
+    spoon->scaleMesh(1);
+    spoon->getMesh(0)->m_material->setBlue(); spoon->getMesh(0)->m_material->setShininess(0.5);
+    m_world->addChild(spoon);
+    spoon->set_local_pos(Vector3d(0,0,0.2));
+    spoon->compute_inertia_matrix();
+    spoon->wrapMesh();
 
-    cout << "Peg Vertices = " << peg->getNumVertices() << endl;
+//    cMesh* ground =  new cMesh();
+//    cCreatePlane(ground,5,5);
+//    m_world->addChild(ground);
 
-    // create the block
-//    block = new RigidObject(0,"/home/agalvan-admin/ImplicitNonlinearComplementarity/resources/RigidBodyDemo/cube.obj");
-//    block->scaleMesh(2);
-    block = new RigidObject(0,"/home/aldo/ImplicitNonlinearComplementarity/resources/PegInHole/block.obj");
-    block->scaleMesh(.025);
-    block->getMesh(0)->m_material->setRed(); block->getMesh(0)->m_material->setShininess(0.5);
-    m_world->addChild(block);
-    block->compute_inertia_matrix();
-    block->set_local_pos(Vector3d(0,0,-0.45));
-    block->computeAllNormals();
-    block->setWireMode(true);
+    // create the  mug
+//     mug = new PenaltyObject(false,0,"/home/aldo/ImplicitNonlinearComplementarity/resources/RigidBodyDemo/cube.obj");
+//     mug->scaleMesh(2);
+//     mug->getMesh(0)->m_material->setRed();  mug->getMesh(0)->m_material->setShininess(0.5);
+//     m_world->addChild( mug);
+//     mug->compute_inertia_matrix();
+//     mug->wrapMesh();
+//     mug->computeAllNormals();
+//     mug->wrapMesh();
+//     mug->setWireMode(false);
 
-    cout << "Block Vertices = " << block->getNumVertices() << endl;
+    if (m_readTrajectory)
+    {
+        inputFile = new std::ifstream("recording.txt");
+        if (!inputFile->is_open()) {
+            std::cerr << "Failed to open the file for reading." << std::endl;
+        }
+    }
+
+    if (m_recordTrajectory)
+    {
+        outputFile = new std::ofstream("recording.txt");
+        if (!outputFile->is_open()) {
+            std::cerr << "Failed to open the file for writing." << std::endl;
+            return;
+        }
+    }
+
+    if (m_recordData)
+    {
+        dataFile = new std::ofstream("bdf2.txt");
+        if (!dataFile->is_open()) {
+            std::cerr << "Failed to open the file for writing." << std::endl;
+            return;
+        }
+    }
 }
 
 void PenaltyDemo::updateHaptics(Vector3d& f)
 {
-    peg->updateFromDevice();
+    spoon->updateFromDevice();
+    f = Vector3d(0,0,0);
 }
 
-void PenaltyDemo::step(double dt)
+void PenaltyDemo::step(double h)
 {
 
-    // update the variables of the complementarity problem
-    peg->updateComplementarityProblem(dt);
+    // update the  mug
 
-    // update the block
-    block->x_tilde = block->x;
+//    VectorXd spoon_start = spoon->get_configuration();
+//    VectorXd spoon_end = spoon->get_configuration();
+//    const MatrixXd& spoon_vertices = spoon->vertices();
+//    const MatrixXi& spoon_triangles = spoon->triangles();
+//    VectorXd  mug_start =  mug->get_configuration();
+//    VectorXd  mug_end =  mug->get_configuration();
+//    const MatrixXd&  mug_vertices =  mug->vertices();
+//    const MatrixXi&  mug_triangles =  mug->triangles();
 
-    VectorXd peg_start = peg->get_configuration();
-    VectorXd peg_end = peg->get_configuration_unconstrained();
-    const MatrixXd& peg_vertices = peg->vertices();
-    const MatrixXi& peg_triangles = peg->triangles();
-    VectorXd block_start = block->get_configuration();
-    VectorXd block_end = block->get_configuration_unconstrained();
-    const MatrixXd& block_vertices = block->vertices();
-    const MatrixXi& block_triangles = block->triangles();
 
-    vector<Contact*> contacts;
-    vector<cShapeLine*> colvis;
+    vector<Collision> potentialCollisions;
+//    if (1)
+//    {
+//        CollisionDetector::findCollisionsBroadPhase(spoon_start, spoon_end, spoon_vertices, spoon_triangles,
+//                                                    mug_start, mug_end, mug_vertices, mug_triangles,
+//                                                    potentialCollisions);
+//    }
 
-    if (CollisionDetector::findCollisionsRigidRigid(peg_start,peg_end,peg_vertices, peg_triangles,
-                                                    block_start, block_end, block_vertices, block_triangles, contacts,colvis))
-    {
-
-        for (int cidx = 0 ; cidx < colvis.size() ; cidx ++)
-        {    m_world->addChild(colvis[cidx]);}
-
-        int ndof = 3; // the degrees of freedom of the god object
-        int num_contacts = contacts.size();
-
-        cout << "Num Contacts = " << num_contacts << endl;
-
-        // God Object
-        Vector3d x = peg->x_tilde;
-        Vector3d u = peg->xdot_tilde;
-        MatrixXd M = peg->M();
-        const Vector3d& u_tilde = peg->xdot_tilde;
-
-        // Block
-        Vector3d& x_block = block->x;
-
-        // lagrange multipliers
-        VectorXd lambda =  VectorXd::Zero(num_contacts + 2*num_contacts);
-        VectorXd delta_lambda = VectorXd::Zero(num_contacts + 2*num_contacts);
-        VectorXd h = VectorXd::Zero(num_contacts + 2*num_contacts);
-        MatrixXd C = MatrixXd::Zero(num_contacts + 2*num_contacts,num_contacts + 2*num_contacts);
-        VectorXi is_active = VectorXi::Zero(num_contacts + 2*num_contacts);
-
-        // iterates over contacts to create the contact jacobian
-        J.resize(num_contacts + 2*num_contacts,ndof);
-
-        // compute the current residual
-
-        for (int newtonit = 0; newtonit < numNewtonIt; newtonit++)
-        {
-            cout << "Newton It : " << newtonit << endl;
-            cout << "x = " << x.transpose() << endl;
-            cout << "u = " << u.transpose() << endl;
-            cout << "u_tilde = " << u_tilde.transpose() << endl;
-            for (int cidx = 0; cidx < num_contacts; cidx++)
-            {
-
-                // the contact of interest
-                Contact* contact = contacts[cidx];
-
-                // normal contact constraints
-                double lambda_normal = lambda(cidx);
-
-                // friction
-                Vector2d lambda_friction = lambda.block<2,1>(num_contacts + 2 * cidx, 0);
-
-                // the contact basis
-                MatrixXd n_t_b = contact->n_t_b;
-
-                // the normal
-                Vector3d n = n_t_b.col(0);
-                MatrixXd D = n_t_b.block<3,2>(0,1);
-
-                // object indices
-                int objectA_idx = contact->objectIdxA;
-                int objectB_idx = contact->objectIdxB;
-
-                // preconditioning parameter
-                double r_n = 1; double r_f = 1;
-
-                // fill the normal constraint vector and normal jacobian
-                if (objectA_idx == 0 )
-                {
-                    // normal constraints
-                    double C_n = n.dot(( x + contact->contact_wrt_objectA ) - (block->x + contact->contact_wrt_objectB) ) - 1e-6;
-                    cout << "C_n = " << C_n << endl;
-                    h(cidx) = fischer(C_n,lambda_normal) / dt;
-                    double pfpa = fischer_partial_a(C_n, r_n * lambda_normal);
-                    double pfpb =  fischer_partial_b(C_n, r_n * lambda_normal);
-                    C(cidx, cidx) = pfpb / (dt*dt) ;
-                    J.block<1, 3>(cidx, 0) = pfpa*n;
-
-                    // friction constraints
-                    J.block<2, 3>(num_contacts + 2 * cidx, 0) = D.transpose();
-                    double W_f = W_fischer(D,u, lambda_friction, r_f, 0.5, lambda_normal);
-                    h.block<2,1>(num_contacts + 2*cidx,0) = D.transpose() * u + W_f * lambda_friction;
-                    C.block<2, 2>(num_contacts + 2 * cidx, num_contacts + 2 * cidx) = W_f*Matrix2d::Identity() / dt ;
-                }
-                else if (objectA_idx == 1)
-                {
-                    // normal constraints
-                    double C_n = n.dot(( block->x + contact->contact_wrt_objectA ) - ( x + contact->contact_wrt_objectB ) );
-                    cout << "C_n = " << C_n << endl;
-                    h(cidx) = fischer(C_n,lambda_normal) / dt;
-                    double pfpa = fischer_partial_a(C_n, r_n * lambda_normal);
-                    double pfpb =  fischer_partial_b(C_n, r_n * lambda_normal);
-                    C(cidx, cidx) = pfpb / (dt*dt) ;
-                    J.block<1, 3>(cidx, 0) = -pfpa*n;
-
-                    // friction constraints
-                    J.block<2, 3>( num_contacts + 2 * cidx, 0) = -D.transpose();
-                    double W_f = W_fischer(D,u, lambda_friction, r_f, 0.5, lambda_normal);
-                    h.block<2 , 1>(num_contacts + 2*cidx,0) = D.transpose() * u + W_f * lambda_friction;
-                    C.block<2 , 2>(num_contacts + 2 * cidx, num_contacts + 2 * cidx) = W_f*Matrix2d::Identity() / dt ;
-                }
-            }
-
-//            cout << "J = " << J << endl;
-
-            // Assemble system matrices
-            MatrixXd H = M; MatrixXd H_inv = H.inverse();
-            VectorXd g = M * (u - u_tilde) - dt * J.transpose() * lambda;
-            MatrixXd A = J * H_inv * J.transpose() + C; A += 1e-6*MatrixXd::Identity(A.rows(),A.cols());
-            VectorXd b = (J * H_inv * g - h) / dt;
-
-            for (int cidx = 0 ; cidx < num_contacts; cidx++)
-                1;
-
-            // solve the system
-            Eigen::FullPivLU<Eigen::MatrixXd> lu_decomp(A); // Perform LU decomposition
-            delta_lambda = lu_decomp.solve(b);
-            VectorXd delta_u = (H_inv * (J.transpose() * (delta_lambda * dt) - g));
-            VectorXd impulse = H_inv * (J.transpose() * (delta_lambda * dt));
-            cout << "impulse = " << impulse.transpose() << endl;
-            cout << "delta_u = " << delta_u.transpose() << endl;
-
-            // perform a backtracking line search
-            double t = 0.75;
-
-            for (int i = 0 ; i < delta_lambda.size(); i++)
-            {
-                if (delta_lambda[i] < 0 )
-                    delta_lambda[i] = 0;
-            }
-
-            // the residual of this function
-            // VectorXd r = computeResidual(x, u, u_tilde, lambda_normal, M, colInfo, dt);
-
-            // the backtracking line search
-//            backtrackingLineSearch(t, err, x , u , u_tilde, delta_u, lambda_normal , delta_lambda,
-//                                   M, colInfo, dt, alpha, beta, backtrackingIt );
-
-            cout << "delta_lambda = " << delta_lambda.transpose() << endl;
-            lambda += delta_lambda*t;
-            u += delta_u*t;
-            cout << "delta_x = " << delta_u.transpose()*dt << endl;
-            x += delta_u*dt;
-
-            auto res = computeResidual(x,u,delta_u,u_tilde,lambda,delta_lambda,M,contacts,dt);
-            cout << "Residual = " << res.transpose() << endl;
-
-        }
-        peg->x = x;
-        peg->xdot = u;
-
-        for (int cidx = 0 ; cidx < contacts.size(); cidx++)
-        {
-            delete contacts[cidx];
-        }
-
-        cout << "END" << endl;
-    }
-    else
-    {
-        peg->x = peg->x_tilde;
-        C.resize(0,0); J.resize(0,0);
-    }
-
+    linearizedBDF1Solver(h,potentialCollisions);
+    h_minus_1 = h;
 }
 
 void PenaltyDemo::updateGraphics()
 {
-    peg->update_mesh_position();
-    block->update_mesh_position();
-    vis->setLocalPos(peg->x_d);
+    spoon->update_mesh_position();
+//    mug->update_mesh_position();
+}
+
+void PenaltyDemo::linearizedBDF1Solver(double h, vector<Collision> potentialCollisions)
+{
+    VectorXd x_d = spoon->x_d; Quaterniond q_d = spoon->q_d; q_d.normalize();
+    VectorXd v_d = spoon->xdot_d; VectorXd omega_d = spoon->omega_d;
+
+    cPrecisionClock clock;
+    clock.start(true);
+
+    if (m_readTrajectory)
+    {
+        auto state = sinusoidalTrajectory(0.1,0.7,0,0,simTime);
+        x_d(2) = state.position;
+        x_d(1) = state.position;
+        x_d(2) = state.velocity;
+        x_d(1) = state.velocity;
+    }
+
+    MatrixXd I = MatrixXd::Identity(3,3);
+    Vector3d x_c = spoon->x; Quaterniond q_c = spoon->q; q_c.normalize();
+    Vector3d v_c = spoon->xdot; Vector3d omega_c = spoon->omega;
+    double kc = spoon->Kc; double bc = spoon->Bc;
+    double kt = spoon->Kt; double bt = spoon->Bt;
+    double m = spoon->mass;
+    MatrixXd J_s = spoon->Ibody; MatrixXd Jinv_s = spoon->IbodyInv;
+    Vector3d c = VectorXd::Zero(3); Quaterniond q = Quaterniond::Identity();
+    MatrixXd L = q_c*J_s*q_c.inverse()*omega_c; Matrix3d R = q_c.toRotationMatrix();
+    Quaterniond dq = q_d*q_c.inverse()*q.inverse();
+    Vector3d u_c = 2*acos(q.w())*dq.vec();
+    Quaterniond q_inv = q.inverse();
+    MatrixXd C = Vector4d(dq.x(),dq.y(),dq.z(),dq.w())*RowVector4d(q_inv.x(),q_inv.y(),q_inv.z(),q_inv.w());
+
+    ////////// Coupling Jacobian /////////////////////////////////
+    MatrixXd J_c = MatrixXd::Zero(13,13);
+
+    // the virtual coupling force
+    Vector3d F_c = kc*(x_d-x_c) + bc*(v_d - v_c); //! CHECK!
+    VectorXd T_c = (R*c).cross(F_c) + kt*u_c + bt*(omega_d - omega_c); //! CHECK
+
+    // Derivative of angular velocity wrt quaternion
+    VectorXd pwpqx = (pRpx(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpx(q_c).transpose())*L; //! CHECK
+    VectorXd pwpqy = (pRpy(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpy(q_c).transpose())*L; //! CHECK
+    VectorXd pwpqz = (pRpz(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpz(q_c).transpose())*L; //! CHECK
+    VectorXd pwpqw = (pRpw(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpw(q_c).transpose())*L; //! CHECK
+
+    // derivatives of force with respect to quaternion
+    VectorXd pFcpqx= -kc*pRpx(q_c)*c + bc * vec2skew(c)*pwpqx; //! CHECK!
+    VectorXd pFcpqy= -kc*pRpy(q_c)*c + bc * vec2skew(c)*pwpqy; //! CHECK!
+    VectorXd pFcpqz= -kc*pRpz(q_c)*c + bc * vec2skew(c)*pwpqz; //! CHECK!
+    VectorXd pFcpqw= -kc*pRpw(q_c)*c + bc * vec2skew(c)*pwpqw; //! CHECK!
+
+    // Derivative of linear velocity with respect to quaternion
+    MatrixXd pupq = 2*acos(dq.w())*C.block<3,4>(0,0) - 2/(sqrt(1-dq.w()*dq.w()))*dq.vec()*C.block<1,4>(3,0); //! CHECK!
+    if (pupq.hasNaN())
+        pupq.setZero();
+
+    // Elements of Jacobian
+    MatrixXd pFcpx = -kc*MatrixXd::Identity(3,3); //! CHECK!
+    MatrixXd pTcpx = vec2skew(R*c)*pFcpx; //! CHECK!
+    MatrixXd pFcpq(3,4);
+    pFcpq.col(0) = pFcpqx; //! CHECK!
+    pFcpq.col(1) = pFcpqy; //! CHECK!
+    pFcpq.col(2) = pFcpqz; //! CHECK!
+    pFcpq.col(3) = pFcpqw; //! CHECK!
+    MatrixXd pTcpq(3,4);
+
+    pTcpq.col(0) = vec2skew(R*c)*pFcpqx - vec2skew(F_c)*pRpx(q_c)*c + kt*pupq.col(0) - bt*pwpqx; //! Check!
+    pTcpq.col(1) = vec2skew(R*c)*pFcpqy - vec2skew(F_c)*pRpy(q_c)*c + kt*pupq.col(1) - bt*pwpqy; //! Check!
+    pTcpq.col(2) = vec2skew(R*c)*pFcpqz - vec2skew(F_c)*pRpz(q_c)*c + kt*pupq.col(2) - bt*pwpqz; //! Check!
+    pTcpq.col(3) = vec2skew(R*c)*pFcpqw - vec2skew(F_c)*pRpw(q_c)*c + kt*pupq.col(3) - bt*pwpqw; //! Check!
+    MatrixXd pFcpP = spoon->Bc*I/m; //! Check!
+    MatrixXd pTcpP = vec2skew(R*c)*pFcpP; //! Check!
+    MatrixXd pFcpL = bc*vec2skew(c)*R*(MatrixXd::Identity(3,3)/m)*R.transpose();
+    MatrixXd pTcpL = (bc*vec2skew(R*c)*vec2skew(c) - bt*I)*R*(I/m)*R.transpose();
+
+    J_c.block<3,3>(7,0) = pFcpx;
+    J_c.block<3,3>(10,0) = pTcpx;
+    J_c.block<3,4>(7,3) = pFcpq;
+    J_c.block<3,4>(10,3) = pTcpq;
+    J_c.block<3,3>(7,7) = pFcpP;
+    J_c.block<3,3>(10,7) = pTcpP;
+    J_c.block<3,3>(7,10) = pFcpL;
+    J_c.block<3,3>(10,10) = pTcpL;
+
+    /////////////////////  END OF COUPLING JACOBIAN ////////////////////
+
+    ///////////////////// PENALTY JACOBIAN ////////////////////////////
+
+    // create the jacobians and force vectors
+    MatrixXd J_p = MatrixXd::Zero(13,13);
+    VectorXd F_p = VectorXd::Zero(3); VectorXd T_p = VectorXd::Zero(3);
+
+    vector<CollisionResult> collisions = computeCollisions(potentialCollisions);
+
+    if (0)
+    {
+
+        for (int i = 0; i < collisions.size(); i++)
+        {
+            double k = collisions[i].sensor->k;
+            double b = collisions[i].sensor->b;
+            Vector3d p0 = collisions[i].p0;
+            Vector3d r = collisions[i].sensor->startPos;
+            Vector3d n = collisions[i].normal;
+            Matrix3d N = n * n.transpose();
+
+            Vector3d F_p_ = -k*N*(x_c + R*r - p0) - k* - b*N*(v_c + omega_c.cross(r));
+            Vector3d T_p_ = Vector3d::Zero();
+            F_p += F_p_; T_p += T_p_;
+
+            MatrixXd pFppx = -k*N;
+            MatrixXd pTppx = vec2skew(R*r)*pFppx;
+            MatrixXd pFppq = MatrixXd::Zero(3,4);
+            pFppq.col(0) = -k*N*pRpx(q_c)*r - b*N*vec2skew(omega_c)*pRpx(q_c)*r + b*N*vec2skew(R*r)*pwpqx;
+            pFppq.col(1) = -k*N*pRpy(q_c)*r - b*N*vec2skew(omega_c)*pRpy(q_c)*r + b*N*vec2skew(R*r)*pwpqy;
+            pFppq.col(2) = -k*N*pRpz(q_c)*r - b*N*vec2skew(omega_c)*pRpz(q_c)*r + b*N*vec2skew(R*r)*pwpqz;
+            pFppq.col(3) = -k*N*pRpw(q_c)*r - b*N*vec2skew(omega_c)*pRpw(q_c)*r + b*N*vec2skew(R*r)*pwpqw;
+            MatrixXd pTppq = MatrixXd::Zero(3,4);
+            pTppq.col(0) = vec2skew(R*r)*pFppq.col(0) - vec2skew(F_p_) * pRpx(q_c)*r;
+            pTppq.col(1) = vec2skew(R*r)*pFppq.col(1) - vec2skew(F_p_) * pRpy(q_c)*r;
+            pTppq.col(2) = vec2skew(R*r)*pFppq.col(2) - vec2skew(F_p_) * pRpz(q_c)*r;
+            pTppq.col(3) = vec2skew(R*r)*pFppq.col(3) - vec2skew(F_p_) * pRpw(q_c)*r;
+            MatrixXd pFppP = -(b/m)*N;
+            MatrixXd pTppP = vec2skew(R*r)*pFppP;
+            MatrixXd pFppL = b*N* vec2skew(R*r)*R*(I/m)*R.transpose();
+            MatrixXd pTppL = vec2skew(R*r)*pFppL;
+
+            J_p.block<3,3>(7,0) += pFppx;
+            J_p.block<3,3>(10,0) += pTppx;
+            J_p.block<3,4>(7,3) += pFppq;
+            J_p.block<3,4>(10,3) += pTppq;
+            J_p.block<3,3>(7,7) += pFppP;
+            J_p.block<3,3>(10,7) += pTppP;
+            J_p.block<3,3>(7,10) += pFppL;
+            J_p.block<3,3>(10,10) += pTppL;
+
+            cout <<" HEY " << flush;
+        }
+    }
+
+
+    ///////////////////// END OF PENALTY JACOBIAN ////////////////////////////
+
+    ////////// RIGID BODY JACOBIAN /////////////////////////////////
+
+    MatrixXd Q_ = Q(q_c);
+    MatrixXd pQpx_ = pQpx();
+    MatrixXd pQpy_ = pQpy();
+    MatrixXd pQpz_ = pQpz();
+    MatrixXd pQpw_ = pQpw();
+
+    MatrixXd pqdotpL = Q_*R*(I/m)*R.transpose();
+    MatrixXd pqdotpq(4,4);
+    pqdotpq.col(0) = pQpx_*omega_c + Q_*pwpqx;
+    pqdotpq.col(1) = pQpy_*omega_c + Q_*pwpqy;
+    pqdotpq.col(2) = pQpz_*omega_c + Q_*pwpqz;
+    pqdotpq.col(3) = pQpw_*omega_c + Q_*pwpqw;
+
+    MatrixXd J_r = MatrixXd::Zero(13,13);
+    J_r.block<3,3>(0,10) = I / m;
+    J_r.block<4,4>(3,3) = pqdotpq;
+    J_r.block<4,3>(3,10) = pqdotpL;
+
+    ////////// END RIGID BODY JACOBIAN /////////////////////////////////
+
+
+    ///////////////////// LINEARIZED IMPLICIT SOLVER ////////////////////////////
+
+    MatrixXd A = MatrixXd::Zero(13,13);
+    A = MatrixXd::Identity(13,13) - h*(J_r + J_c + J_p);
+
+    VectorXd b = VectorXd::Zero(13);
+    b.block<3,1>(0,0) = h*v_c;
+    Quaterniond temp = Quaterniond(omega_c(0),omega_c(1),omega_c(2),0)*q_c;
+    b.block<4,1>(3,0) = h*0.5*Vector4d(temp.x(),temp.y(),temp.z(),temp.w());
+    b.block<3,1>(7,0) = h*(F_c + F_p);
+    b.block<3,1>(10,0) = h*(T_c + T_p);
+
+    VectorXd y = A.colPivHouseholderQr().solve(b);
+
+    // Peform integration
+    x_c = y.block<3,1>(0,0) + x_c;
+    q_c = sumQuaternions(Quaterniond(y(3),y(4),y(5),y(6)), q_c);
+    q_c.normalize();
+    v_c = y.block<3,1>(7,0)/m + v_c;
+    omega_c = spoon->IbodyInv*y.block<3,1>(10,0) + omega_c;
+
+    // update new states
+    spoon->x = x_c;
+    spoon->q = q_c;
+    spoon->q.normalize();
+    spoon->update_inertia_matrix();
+    spoon->xdot = v_c;
+    spoon->omega = omega_c;
+
+    F_c = kc*(x_d-x_c) + bc*(v_d - v_c); //! CHECK!
+    T_c = (R*c).cross(F_c) + kt*u_c + bt*(omega_d - omega_c); //! CHECK
+
+    if (m_recordData)
+    {
+        if (!dataFile->is_open())
+        {
+            std::cerr << "Failed to open the file for writing." << std::endl;
+        }
+
+        *dataFile << simTime << " " << x_d(0) << " " << x_d(1) << " " << x_d(2) << " " <<
+                  q_d.x() << " " << q_d.y() << " " << q_d.z() << " " << q_d.w() << " " <<
+                  x_c(0) << " " << x_c(1) << " " << x_c(2) << " " <<
+                  q_c.x() << " " << q_c.y() << " " << q_c.z() << " " << q_c.w() << " " <<
+                  F_c(0) << " " << F_c(1) << " " << F_c(2) << " " <<
+                  T_c(0) << " " << T_c(1) << " " << T_c(2) << endl;
+
+    }
+
+
+    simTime += h;
+}
+
+void PenaltyDemo::BDF1Solver(double h, vector<Collision> potentialCollisions)
+{
+    VectorXd x_d = spoon->x_d; Quaterniond q_d = spoon->q_d; q_d.normalize();
+    VectorXd v_d = spoon->xdot_d; VectorXd omega_d = spoon->omega_d;
+
+    if (m_readTrajectory)
+    {
+        auto state = sinusoidalTrajectory(0.1,0.7,0,0,simTime);
+        x_d(2) = state.position;
+        x_d(1) = state.position;
+        x_d(2) = state.velocity;
+        x_d(1) = state.velocity;
+    }
+
+    MatrixXd I = MatrixXd::Identity(3,3);
+    Vector3d x_c = spoon->x; Quaterniond q_c = spoon->q; q_c.normalize();
+    Vector3d v_c = spoon->xdot; Vector3d omega_c = spoon->omega;
+    double kc = spoon->Kc; double bc = spoon->Bc;
+    double kt = spoon->Kt; double bt = spoon->Bt;
+    double m = spoon->mass;
+    MatrixXd J_s = spoon->Ibody; MatrixXd Jinv_s = spoon->IbodyInv;
+    Vector3d c = VectorXd::Zero(3); Quaterniond q = Quaterniond::Identity();
+    MatrixXd L = q_c*J_s*q_c.inverse()*omega_c; Matrix3d R = q_c.toRotationMatrix();
+    Quaterniond dq = q_d*q_c.inverse()*q_c.inverse()*q;
+    Vector3d u_c = 2*acos(q.w())*dq.vec();
+    Quaterniond q_inv = q.inverse();
+    MatrixXd C = Vector4d(dq.x(),dq.y(),dq.z(),dq.w())*RowVector4d(q_inv.x(),q_inv.y(),q_inv.z(),q_inv.w());
+
+
+    // the virtual coupling force
+    Vector3d F_c = kc*(x_d-x_c) + bc*(v_d - v_c); //! CHECK!
+    VectorXd T_c = (R*c).cross(F_c) + kt*u_c + bt*(omega_d - omega_c); //! CHECK
+
+    int it = 0;
+    while(it < maxIt)
+    {
+        ////////// Coupling Jacobian /////////////////////////////////
+        MatrixXd J_c = MatrixXd::Zero(13,13);
+
+        // Derivative of angular velocity wrt quaternion
+        VectorXd pwpqx = (pRpx(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpx(q_c).transpose())*L; //! CHECK
+        VectorXd pwpqy = (pRpy(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpy(q_c).transpose())*L; //! CHECK
+        VectorXd pwpqz = (pRpz(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpz(q_c).transpose())*L; //! CHECK
+        VectorXd pwpqw = (pRpw(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpw(q_c).transpose())*L; //! CHECK
+
+        // derivatives of force with respect to quaternion
+        VectorXd pFcpqx= -kc*pRpx(q_c)*c + bc * vec2skew(c)*pwpqx; //! CHECK!
+        VectorXd pFcpqy= -kc*pRpy(q_c)*c + bc * vec2skew(c)*pwpqy; //! CHECK!
+        VectorXd pFcpqz= -kc*pRpz(q_c)*c + bc * vec2skew(c)*pwpqz; //! CHECK!
+        VectorXd pFcpqw= -kc*pRpw(q_c)*c + bc * vec2skew(c)*pwpqw; //! CHECK!
+
+        // Derivative of linear velocity with respect to quaternion
+        MatrixXd pupq = 2*acos(dq.w())*C.block<3,4>(0,0) - 2/(sqrt(1-dq.w()*dq.w()))*dq.vec()*C.block<1,4>(3,0); //! CHECK!
+        if (pupq.hasNaN())
+            pupq.setZero();
+
+        // Elements of Jacobian
+        MatrixXd pFcpx = -kc*MatrixXd::Identity(3,3); //! CHECK!
+        MatrixXd pTcpx = vec2skew(R*c)*pFcpx; //! CHECK!
+        MatrixXd pFcpq(3,4);
+        pFcpq.col(0) = pFcpqx; //! CHECK!
+        pFcpq.col(1) = pFcpqy; //! CHECK!
+        pFcpq.col(2) = pFcpqz; //! CHECK!
+        pFcpq.col(3) = pFcpqw; //! CHECK!
+        MatrixXd pTcpq(3,4);
+
+        pTcpq.col(0) = vec2skew(R*c)*pFcpqx - vec2skew(F_c)*pRpx(q_c)*c + kt*pupq.col(0) - bt*pwpqx; //! Check!
+        pTcpq.col(1) = vec2skew(R*c)*pFcpqy - vec2skew(F_c)*pRpy(q_c)*c + kt*pupq.col(1) - bt*pwpqy; //! Check!
+        pTcpq.col(2) = vec2skew(R*c)*pFcpqz - vec2skew(F_c)*pRpz(q_c)*c + kt*pupq.col(2) - bt*pwpqz; //! Check!
+        pTcpq.col(3) = vec2skew(R*c)*pFcpqw - vec2skew(F_c)*pRpw(q_c)*c + kt*pupq.col(3) - bt*pwpqw; //! Check!
+        MatrixXd pFcpP = spoon->Bc*I/m; //! Check!
+        MatrixXd pTcpP = vec2skew(R*c)*pFcpP; //! Check!
+        MatrixXd pFcpL = bc*vec2skew(c)*R*(MatrixXd::Identity(3,3)/m)*R.transpose();
+        MatrixXd pTcpL = (bc*vec2skew(R*c)*vec2skew(c) - bt*I)*R*(I/m)*R.transpose();
+
+        J_c.block<3,3>(7,0) = pFcpx;
+        J_c.block<3,3>(10,0) = pTcpx;
+        J_c.block<3,4>(7,3) = pFcpq;
+        J_c.block<3,4>(10,3) = pTcpq;
+        J_c.block<3,3>(7,7) = pFcpP;
+        J_c.block<3,3>(10,7) = pTcpP;
+        J_c.block<3,3>(7,10) = pFcpL;
+        J_c.block<3,3>(10,10) = pTcpL;
+
+        /////////////////////  END OF COUPLING JACOBIAN ////////////////////
+
+        ///////////////////// PENALTY JACOBIAN ////////////////////////////
+
+        // create the jacobians and force vectors
+        //    VectorXd F_p = VectorXd::Zero(3); VectorXd T_p = VectorXd::Zero(4);
+        //
+        //    // Penalty force
+        //    MatrixXd F_p  =
+        //
+        //    MatrixXd J_p = ;
+
+        ///////////////////// END OF PENALTY JACOBIAN ////////////////////////////
+
+        ////////// RIGID BODY JACOBIAN /////////////////////////////////
+
+        MatrixXd Q_ = Q(q_c);
+        MatrixXd pQpx_ = pQpx();
+        MatrixXd pQpy_ = pQpy();
+        MatrixXd pQpz_ = pQpz();
+        MatrixXd pQpw_ = pQpw();
+
+        MatrixXd pqdotpL = Q_*R*(I/m)*R.transpose();
+        MatrixXd pqdotpq(4,4);
+        pqdotpq.col(0) = pQpx_*omega_c + Q_*pwpqx;
+        pqdotpq.col(1) = pQpy_*omega_c + Q_*pwpqy;
+        pqdotpq.col(2) = pQpz_*omega_c + Q_*pwpqz;
+        pqdotpq.col(3) = pQpw_*omega_c + Q_*pwpqw;
+
+        MatrixXd J_r = MatrixXd::Zero(13,13);
+        J_r.block<3,3>(0,10) = I / m;
+        J_r.block<4,4>(3,3) = pqdotpq;
+        J_r.block<4,3>(3,10) = pqdotpL;
+
+        ////////// END RIGID BODY JACOBIAN /////////////////////////////////
+
+
+        ///////////////////// LINEARIZED IMPLICIT SOLVER ////////////////////////////
+
+        MatrixXd A = MatrixXd::Zero(13,13);
+        A = MatrixXd::Identity(13,13) - h*(J_r + J_c);
+
+        VectorXd b = VectorXd::Zero(13);
+        b.block<3,1>(0,0) = h*v_c;
+        Quaterniond temp = Quaterniond(omega_c(0),omega_c(1),omega_c(2),0)*q_c;
+        b.block<4,1>(3,0) = h*0.5*Vector4d(temp.x(),temp.y(),temp.z(),temp.w());
+        b.block<3,1>(7,0) = h*F_c;
+        b.block<3,1>(10,0) = h*T_c;
+
+        VectorXd y = A.colPivHouseholderQr().solve(b);
+
+        // Peform integration
+        x_c = 0.75*y.block<3,1>(0,0) + x_c;
+        q_c = sumQuaternions(Quaterniond(y(3),y(4),y(5),y(6)), q_c);
+        q_c.normalize();
+        v_c = 0.75*y.block<3,1>(7,0)/m + v_c;
+        omega_c = q_c*J_s*q_c.inverse()*y.block<3,1>(10,0) + omega_c;
+
+
+        // Update the constants
+        L = q_c*J_s*q_c.inverse()*omega_c; R = q_c.toRotationMatrix();
+        dq = q_d*q_c.inverse()*q.inverse();
+        u_c = 2*acos(q.w())*dq.vec();
+        C = Vector4d(dq.x(),dq.y(),dq.z(),dq.w())*RowVector4d(q_inv.x(),q_inv.y(),q_inv.z(),q_inv.w());
+        F_c = kc*(x_d - x_c) + bc*(v_d - v_c);
+        T_c = (R*c).cross(F_c) + kt*u_c + bt*(omega_d - omega_c);
+
+        if (y.norm() < 1e-3)
+            break;
+
+        it++;
+
+    }
+
+    spoon->x = x_c;
+    spoon->q = q_c;
+    spoon->q.normalize();
+    spoon->update_inertia_matrix();
+    spoon->xdot = v_c;
+    spoon->omega = omega_c;
+
+
+    simTime += h;
+
+}
+void PenaltyDemo::linearizedBDF2Solver(double h, vector<Collision> potentialCollisions)
+{
+
+    MatrixXd J_s = spoon->Ibody; MatrixXd Jinv_s = spoon->IbodyInv;
+    VectorXd x_d = spoon->x_d; Quaterniond q_d = spoon->q_d; q_d.normalize();
+    VectorXd v_d = spoon->xdot_d; VectorXd omega_d = spoon->omega_d;
+
+    if (m_readTrajectory)
+    {
+        auto state = sinusoidalTrajectory(0.1,0.7,0,0,simTime);
+        x_d(2) = state.position;
+        x_d(1) = state.position;
+        x_d(2) = state.velocity;
+        x_d(1) = state.velocity;
+    }
+
+    double phi = h / h_minus_1;
+    double k1 = (1+phi)*(1+phi)/(1+2*phi);
+    double k2 = phi*phi/(1+2*phi);
+    double k3 = h*(1+phi)/(1+2*phi);
+
+    MatrixXd I = MatrixXd::Identity(3,3);
+    VectorXd x_c_minus_1 = spoon->x_minus_1; Quaterniond q_c_minus_1 = spoon->q_minus_1;
+    VectorXd x_c = spoon->x; Quaterniond q_c = spoon->q; q_c.normalize();
+    VectorXd v_c_minus_1 = spoon->xdot_minus_1; VectorXd omega_c_minus_1 = spoon->omega_minus_1;
+    VectorXd v_c = spoon->xdot; VectorXd omega_c = spoon->omega;
+    double kc = spoon->Kc; double bc = spoon->Bc;
+    double kt = spoon->Kt; double bt = spoon->Bt;
+    double m = spoon->mass;
+    Vector3d c = VectorXd::Zero(3); Quaterniond q = Quaterniond::Identity();
+    MatrixXd L = q_c*J_s*q_c.inverse()*omega_c; Matrix3d R = q_c.toRotationMatrix();
+    Quaterniond dq = q_d*q_c.inverse()*q.inverse();
+    Vector3d u_c = 2*acos(q.w())*dq.vec();
+    Quaterniond q_inv = q.inverse();
+    MatrixXd C = Vector4d(dq.x(),dq.y(),dq.z(),dq.w())*RowVector4d(q_inv.x(),q_inv.y(),q_inv.z(),q_inv.w());
+
+    // the virtual coupling force
+    Vector3d F_c = kc * ( x_d - x_c ) + bc * ( v_d - v_c ); //! CHECK!
+    VectorXd T_c = (R*c).cross(F_c) + kt*u_c + bt*(omega_d - omega_c); //! CHECK
+
+    ////////// Coupling Jacobian /////////////////////////////////
+    MatrixXd J_c = MatrixXd::Zero(13,13);
+
+    // Derivative of angular velocity wrt quaternion
+    VectorXd pwpqx = (pRpx(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpx(q_c).transpose())*L; //! CHECK
+    VectorXd pwpqy = (pRpy(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpy(q_c).transpose())*L; //! CHECK
+    VectorXd pwpqz = (pRpz(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpz(q_c).transpose())*L; //! CHECK
+    VectorXd pwpqw = (pRpw(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpw(q_c).transpose())*L; //! CHECK
+
+    // derivatives of force with respect to quaternion
+    VectorXd pFcpqx= -kc*pRpx(q_c)*c + bc * vec2skew(c)*pwpqx; //! CHECK!
+    VectorXd pFcpqy= -kc*pRpy(q_c)*c + bc * vec2skew(c)*pwpqy; //! CHECK!
+    VectorXd pFcpqz= -kc*pRpz(q_c)*c + bc * vec2skew(c)*pwpqz; //! CHECK!
+    VectorXd pFcpqw= -kc*pRpw(q_c)*c + bc * vec2skew(c)*pwpqw; //! CHECK!
+
+    // Derivative of linear velocity with respect to quaternion
+    MatrixXd pupq = 2*acos(dq.w())*C.block<3,4>(0,0) - 2/(sqrt(1-dq.w()*dq.w()))*dq.vec()*C.block<1,4>(3,0); //! CHECK!
+    if (pupq.hasNaN())
+        pupq.setZero();
+
+    // Elements of Jacobian
+    MatrixXd pFcpx = -kc*MatrixXd::Identity(3,3); //! CHECK!
+    MatrixXd pTcpx = vec2skew(R*c)*pFcpx; //! CHECK!
+    MatrixXd pFcpq(3,4);
+    pFcpq.col(0) = pFcpqx; //! CHECK!
+    pFcpq.col(1) = pFcpqy; //! CHECK!
+    pFcpq.col(2) = pFcpqz; //! CHECK!
+    pFcpq.col(3) = pFcpqw; //! CHECK!
+    MatrixXd pTcpq(3,4);
+
+    pTcpq.col(0) = vec2skew(R*c)*pFcpqx - vec2skew(F_c)*pRpx(q_c)*c + kt*pupq.col(0) - bt*pwpqx; //! Check!
+    pTcpq.col(1) = vec2skew(R*c)*pFcpqy - vec2skew(F_c)*pRpy(q_c)*c + kt*pupq.col(1) - bt*pwpqy; //! Check!
+    pTcpq.col(2) = vec2skew(R*c)*pFcpqz - vec2skew(F_c)*pRpz(q_c)*c + kt*pupq.col(2) - bt*pwpqz; //! Check!
+    pTcpq.col(3) = vec2skew(R*c)*pFcpqw - vec2skew(F_c)*pRpw(q_c)*c + kt*pupq.col(3) - bt*pwpqw; //! Check!
+    MatrixXd pFcpP = spoon->Bc*I/m; //! Check!
+    MatrixXd pTcpP = vec2skew(R*c)*pFcpP; //! Check!
+    MatrixXd pFcpL = bc*vec2skew(c)*R*(MatrixXd::Identity(3,3)/m)*R.transpose();
+    MatrixXd pTcpL = (bc*vec2skew(R*c)*vec2skew(c) - bt*I)*R*(I/m)*R.transpose();
+
+    J_c.block<3,3>(7,0)  = pFcpx;
+    J_c.block<3,3>(10,0) = pTcpx;
+    J_c.block<3,4>(7,3)  = pFcpq;
+    J_c.block<3,4>(10,3) = pTcpq;
+    J_c.block<3,3>(7,7)  = pFcpP;
+    J_c.block<3,3>(10,7) = pTcpP;
+    J_c.block<3,3>(7,10) = pFcpL;
+    J_c.block<3,3>(10,10) = pTcpL;
+
+    /////////////////////  END OF COUPLING JACOBIAN ////////////////////
+
+    ///////////////////// PENALTY JACOBIAN ////////////////////////////
+
+    // create the jacobians and force vectors
+//    VectorXd F_p = VectorXd::Zero(3); VectorXd T_p = VectorXd::Zero(4);
+//
+//    // Penalty force
+//    MatrixXd F_p  =
+//
+//    MatrixXd J_p = ;
+
+    ///////////////////// END OF PENALTY JACOBIAN ////////////////////////////
+
+    ////////// RIGID BODY JACOBIAN /////////////////////////////////
+
+    MatrixXd Q_ = Q(q_c);
+    MatrixXd pQpx_ = pQpx();
+    MatrixXd pQpy_ = pQpy();
+    MatrixXd pQpz_ = pQpz();
+    MatrixXd pQpw_ = pQpw();
+
+    MatrixXd pqdotpL = Q_*R*(I/m)*R.transpose();
+    MatrixXd pqdotpq(4,4);
+    pqdotpq.col(0) = pQpx_*omega_c + Q_*pwpqx;
+    pqdotpq.col(1) = pQpy_*omega_c + Q_*pwpqy;
+    pqdotpq.col(2) = pQpz_*omega_c + Q_*pwpqz;
+    pqdotpq.col(3) = pQpw_*omega_c + Q_*pwpqw;
+
+    MatrixXd J_r = MatrixXd::Zero(13,13);
+    J_r.block<3,3>(0,10) = I / m;
+    J_r.block<4,4>(3,3) = pqdotpq;
+    J_r.block<4,3>(3,10) = pqdotpL;
+
+    ////////// END RIGID BODY JACOBIAN /////////////////////////////////
+
+    ///////////////////// LINEARIZED IMPLICIT SOLVER ////////////////////////////
+
+    MatrixXd A = MatrixXd::Zero(13,13);
+    A = MatrixXd::Identity(13,13) - h*(J_r + J_c);
+
+    VectorXd b = VectorXd::Zero(13);
+    b.block<3,1>(0,0) = k3*v_c;
+    Quaterniond temp = Quaterniond(omega_c(0),omega_c(1),omega_c(2),0)*q_c;
+    b.block<4,1>(3,0) = k3*0.5*Vector4d(temp.x(),temp.y(),temp.z(),temp.w());
+    b.block<3,1>(7,0) = k3*F_c;
+    b.block<3,1>(10,0) = k3*T_c;
+
+    VectorXd y = A.colPivHouseholderQr().solve(b);
+
+    // save last states
+    spoon->x_minus_1 = spoon->x; spoon->q_minus_1 = spoon->q;
+    spoon->xdot_minus_1 = spoon->xdot; spoon->omega_minus_1 = spoon->omega;
+
+    // Peform integration
+    x_c = y.block<3,1>(0,0) + k1*x_c - k2*x_c_minus_1;
+    q_c = sumQuaternions(Quaterniond(y(3),y(4),y(5),y(6)), q_c);
+    q_c.normalize();
+    v_c = y.block<3,1>(7,0)/m + k1*v_c - k2*v_c_minus_1;
+    omega_c = spoon->IbodyInv*y.block<3,1>(10,0) + k1*omega_c - k2*omega_c_minus_1;
+
+    F_c = kc * ( x_d - x_c ) + bc * ( v_d - v_c ); //! CHECK!
+    T_c = (R*c).cross(F_c) + kt*u_c + bt*(omega_d - omega_c); //! CHECK
+
+    // update new states
+    spoon->x = x_c;
+    spoon->q = q_c;
+    spoon->q.normalize();
+    spoon->update_inertia_matrix();
+    spoon->xdot = v_c;
+    spoon->omega = omega_c;
+
+    if (m_recordData)
+    {
+        if (!dataFile->is_open())
+        {
+            std::cerr << "Failed to open the file for writing." << std::endl;
+        }
+
+        *dataFile << simTime << " " << x_d(0) << " " << x_d(1) << " " << x_d(2) << " " <<
+                  q_d.x() << " " << q_d.y() << " " << q_d.z() << " " << q_d.w() << " " <<
+                  x_c(0) << " " << x_c(1) << " " << x_c(2) << " " <<
+                  q_c.x() << " " << q_c.y() << " " << q_c.z() << " " << q_c.w() << " " <<
+                    F_c(0) << " " << F_c(1) << " " << F_c(2) << " " <<
+               T_c(0) << " " << T_c(1) << " " << T_c(2) << endl;
+    }
+
+    simTime += h;
+}
+
+void PenaltyDemo::BDF2Solver(double h, vector<Collision> potentialCollisions)
+{
+
+    VectorXd x_d = spoon->x_d; Quaterniond q_d = spoon->q_d; q_d.normalize();
+    VectorXd v_d = spoon->xdot_d; VectorXd omega_d = spoon->omega_d;
+
+    if (m_readTrajectory)
+    {
+        auto state = sinusoidalTrajectory(0.1,0.7,0,0,simTime);
+        x_d(2) = state.position;
+        x_d(1) = state.position;
+        x_d(2) = state.velocity;
+        x_d(1) = state.velocity;
+    }
+
+    double phi = h / h_minus_1;
+    double k1 = (1+phi)*(1+phi)/(1+2*phi);
+    double k2 = phi*phi/(1+2*phi);
+    double k3 = h*(1+phi)/(1+2*phi);
+
+    VectorXd x_c_minus_1 = spoon->x_minus_1; Quaterniond q_c_minus_1 = spoon->q_minus_1;
+    VectorXd x_c = spoon->x; Quaterniond q_c = spoon->q; q_c.normalize();
+    VectorXd v_c_minus_1 = spoon->xdot_minus_1; VectorXd omega_c_minus_1 = spoon->omega_minus_1;
+    VectorXd v_c = spoon->xdot; VectorXd omega_c = spoon->omega;
+    MatrixXd I = MatrixXd::Identity(3,3);
+    double kc = spoon->Kc; double bc = spoon->Bc;
+    double kt = spoon->Kt; double bt = spoon->Bt;
+    double m = spoon->mass;
+    Vector3d c = VectorXd::Zero(3); Quaterniond q = Quaterniond::Identity();
+    MatrixXd J_s = spoon->Ibody; MatrixXd Jinv_s = spoon->IbodyInv;
+    MatrixXd L = q_c*J_s*q_c.inverse()*omega_c; Matrix3d R = q_c.toRotationMatrix();
+    Quaterniond dq = q_d*q_c.inverse()*q.inverse();
+    Vector3d u_c = 2*acos(q.w())*dq.vec();
+    Quaterniond q_inv = q.inverse();
+    MatrixXd C = Vector4d(dq.x(),dq.y(),dq.z(),dq.w())*RowVector4d(q_inv.x(),q_inv.y(),q_inv.z(),q_inv.w());
+
+    // the virtual coupling force
+    Vector3d F_c = kc*(x_d-x_c) + bc*(v_d - v_c); //! CHECK!
+    VectorXd T_c = (R*c).cross(F_c) + kt*u_c + bt*(omega_d - omega_c); //! CHECK
+
+    int it = 0;
+    while(it < maxIt)
+    {
+        ////////// Coupling Jacobian /////////////////////////////////
+        MatrixXd J_c = MatrixXd::Zero(13,13);
+
+        // Derivative of angular velocity wrt quaternion
+        VectorXd pwpqx = (pRpx(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpx(q_c).transpose())*L; //! CHECK
+        VectorXd pwpqy = (pRpy(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpy(q_c).transpose())*L; //! CHECK
+        VectorXd pwpqz = (pRpz(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpz(q_c).transpose())*L; //! CHECK
+        VectorXd pwpqw = (pRpw(q_c)*(I/m)*R.transpose() + R*(I/m)*pRpw(q_c).transpose())*L; //! CHECK
+
+        // derivatives of force with respect to quaternion
+        VectorXd pFcpqx= -kc*pRpx(q_c)*c + bc * vec2skew(c)*pwpqx; //! CHECK!
+        VectorXd pFcpqy= -kc*pRpy(q_c)*c + bc * vec2skew(c)*pwpqy; //! CHECK!
+        VectorXd pFcpqz= -kc*pRpz(q_c)*c + bc * vec2skew(c)*pwpqz; //! CHECK!
+        VectorXd pFcpqw= -kc*pRpw(q_c)*c + bc * vec2skew(c)*pwpqw; //! CHECK!
+
+        // Derivative of linear velocity with respect to quaternion
+        MatrixXd pupq = 2*acos(dq.w())*C.block<3,4>(0,0) - 2/(sqrt(1-dq.w()*dq.w()))*dq.vec()*C.block<1,4>(3,0); //! CHECK!
+
+        if (pupq.hasNaN())
+            pupq.setZero();
+
+        // Elements of Jacobian
+        MatrixXd pFcpx = -kc*MatrixXd::Identity(3,3); //! CHECK!
+        MatrixXd pTcpx = vec2skew(R*c)*pFcpx; //! CHECK!
+        MatrixXd pFcpq(3,4);
+        pFcpq.col(0) = pFcpqx; //! CHECK!
+        pFcpq.col(1) = pFcpqy; //! CHECK!
+        pFcpq.col(2) = pFcpqz; //! CHECK!
+        pFcpq.col(3) = pFcpqw; //! CHECK!
+        MatrixXd pTcpq(3,4);
+
+        pTcpq.col(0) = vec2skew(R*c)*pFcpqx - vec2skew(F_c)*pRpx(q_c)*c + kt*pupq.col(0) - bt*pwpqx; //! Check!
+        pTcpq.col(1) = vec2skew(R*c)*pFcpqy - vec2skew(F_c)*pRpy(q_c)*c + kt*pupq.col(1) - bt*pwpqy; //! Check!
+        pTcpq.col(2) = vec2skew(R*c)*pFcpqz - vec2skew(F_c)*pRpz(q_c)*c + kt*pupq.col(2) - bt*pwpqz; //! Check!
+        pTcpq.col(3) = vec2skew(R*c)*pFcpqw - vec2skew(F_c)*pRpw(q_c)*c + kt*pupq.col(3) - bt*pwpqw; //! Check!
+        MatrixXd pFcpP = bc*I/m; //! Check!
+        MatrixXd pTcpP = vec2skew(R*c)*pFcpP; //! Check!
+        MatrixXd pFcpL = bc*vec2skew(c)*R*(MatrixXd::Identity(3,3)/m)*R.transpose();
+        MatrixXd pTcpL = (bc*vec2skew(R*c)*vec2skew(c) - bt*I)*R*(I/m)*R.transpose();
+
+        J_c.block<3,3>(7,0) = pFcpx;
+        J_c.block<3,3>(10,0) = pTcpx;
+        J_c.block<3,4>(7,3) = pFcpq;
+        J_c.block<3,4>(10,3) = pTcpq;
+        J_c.block<3,3>(7,7) = pFcpP;
+        J_c.block<3,3>(10,7) = pTcpP;
+        J_c.block<3,3>(7,10) = pFcpL;
+        J_c.block<3,3>(10,10) = pTcpL;
+
+        /////////////////////  END OF COUPLING JACOBIAN ////////////////////
+
+        ///////////////////// PENALTY JACOBIAN ////////////////////////////
+
+        // create the jacobians and force vectors
+        //    VectorXd F_p = VectorXd::Zero(3); VectorXd T_p = VectorXd::Zero(4);
+        //
+        //    // Penalty force
+        //    MatrixXd F_p  =
+        //
+        //    MatrixXd J_p = ;
+
+        ///////////////////// END OF PENALTY JACOBIAN ////////////////////////////
+
+        ////////// RIGID BODY JACOBIAN /////////////////////////////////
+
+        MatrixXd Q_ = Q(q_c);
+        MatrixXd pQpx_ = pQpx();
+        MatrixXd pQpy_ = pQpy();
+        MatrixXd pQpz_ = pQpz();
+        MatrixXd pQpw_ = pQpw();
+
+        MatrixXd pqdotpL = Q_*R*(I/m)*R.transpose();
+        MatrixXd pqdotpq(4,4);
+        pqdotpq.col(0) = pQpx_*omega_c + Q_*pwpqx;
+        pqdotpq.col(1) = pQpy_*omega_c + Q_*pwpqy;
+        pqdotpq.col(2) = pQpz_*omega_c + Q_*pwpqz;
+        pqdotpq.col(3) = pQpw_*omega_c + Q_*pwpqw;
+
+        MatrixXd J_r = MatrixXd::Zero(13,13);
+        J_r.block<3,3>(0,10) = I / m;
+        J_r.block<4,4>(3,3) = pqdotpq;
+        J_r.block<4,3>(3,10) = pqdotpL;
+
+        ////////// END RIGID BODY JACOBIAN /////////////////////////////////
+
+
+        ///////////////////// LINEARIZED IMPLICIT SOLVER ////////////////////////////
+
+        MatrixXd A = MatrixXd::Zero(13,13);
+        A = MatrixXd::Identity(13,13) - h*(J_r + J_c);
+        // preconditioner
+        A += 1e6*MatrixXd::Identity(13,13);
+
+        VectorXd b = VectorXd::Zero(13);
+        b.block<3,1>(0,0) = k3*v_c;
+        Quaterniond temp = Quaterniond(omega_c(0),omega_c(1),omega_c(2),0)*q_c;
+        b.block<4,1>(3,0) = k3*0.5*Vector4d(temp.x(),temp.y(),temp.z(),temp.w());
+        b.block<3,1>(7,0) = k3*F_c;
+        b.block<3,1>(10,0) = k3*T_c;
+
+        VectorXd y = A.colPivHouseholderQr().solve(b);
+
+        // Perform integration
+        x_c = 0.75*y.block<3,1>(0,0) + k1*x_c - k2*x_c_minus_1;
+        q_c = sumQuaternions(Quaterniond(y(3),y(4),y(5),y(6)), q_c);
+        q_c.normalize();
+        v_c = 0.75*y.block<3,1>(7,0)/m + k1*v_c - k2*v_c_minus_1;
+        omega_c = q_c*J_s*q_c.inverse()*y.block<3,1>(10,0)+ k1*omega_c - k2*omega_c_minus_1;
+
+        // Update the constants
+        L = q_c*J_s*q_c.inverse()*omega_c; R = q_c.toRotationMatrix();
+        dq = q_d*q_c.inverse()*q.inverse();
+        u_c = 2*acos(q.w())*dq.vec();
+        C = Vector4d(dq.x(),dq.y(),dq.z(),dq.w())*RowVector4d(q_inv.x(),q_inv.y(),q_inv.z(),q_inv.w());
+        F_c = kc*(x_d-x_c) + bc*(v_d - v_c); //! CHECK!
+        T_c = (R*c).cross(F_c) + kt*u_c + bt*(omega_d - omega_c); //! CHECK
+
+        if (y.norm() < 1e-3)
+            break;
+
+        it++;
+
+    }
+
+    // save last states
+    spoon->x_minus_1 = spoon->x; spoon->q_minus_1 = spoon->q;
+    spoon->xdot_minus_1 = spoon->xdot; spoon->omega_minus_1 = spoon->omega;
+
+    // update new states
+    spoon->x = x_c;
+    spoon->q = q_c;
+    spoon->q.normalize();
+    spoon->update_inertia_matrix();
+    spoon->xdot = v_c;
+    spoon->omega = omega_c;
+
+    if (m_recordData)
+    {
+        if (!dataFile->is_open())
+        {
+            std::cerr << "Failed to open the file for writing." << std::endl;
+            return;
+        }
+
+        *dataFile << simTime << " " << x_d(0) << " " << x_d(1) << " " << x_d(2) << " " <<
+                    q_d.x() << " " << q_d.y() << " " << q_d.z() << " " << q_d.w() << " " <<
+                    x_c(0) << " " << x_c(1) << " " << x_c(2) << " " <<
+                    q_c.x() << " " << q_c.y() << " " << q_c.z() << " " << q_c.w() << " " <<
+                    F_c(0) << " " << F_c(1) << " " << F_c(2) << " " <<
+                    T_c(0) << " " << T_c(1) << " " << T_c(2) << endl;
+
+    }
+
+    simTime += h;
+}
+
+vector<CollisionResult> PenaltyDemo::computeCollisions(vector<Collision> potentialCollisions)
+{
+//    int numPotentialCollisions = potentialCollisions.size(); // Assuming all three vectors have the same size.
+
+//    spoon->updateSensors();
+    vector<vector<Sensor*>> sensors = spoon->m_sensors;
+    vector<vector<CollisionResult>> temp_results;
+    temp_results.resize(sensors.size());
+
+    for (int i = 0; i < sensors.size(); i++) {
+        temp_results[i].resize(sensors[i].size());
+        for (int j = 0 ; j < sensors[i].size(); j++)
+        {
+            temp_results[i][j] = checkSensorCollision(sensors[i][j]);
+        }
+    }
+
+    vector<CollisionResult> results;
+
+    for (int i = 0; i < sensors.size(); i++) {
+        for (int j = 0 ; j < sensors[i].size(); j++)
+        {
+            if (temp_results[i][j].collision == true) {
+                results.emplace_back(temp_results[i][j]);
+            }
+            }
+    }
+
+
+
+//    auto& lvertices = spoon->vertices();
+//    auto& ltriangles = spoon->triangles();
+//    Vector3d lpos = spoon->x;
+//    Quaterniond lq = spoon->q;
+//    auto& rvertices = mug->vertices();
+//    auto& rtriangles = mug->triangles();
+//    Vector3d rpos = mug->x;
+//    Quaterniond rq = mug->q;
+//    vector<vector<Sensor*>> leftSensors = spoon->m_sensors;
+//    vector<vector<Sensor*>> rightSensors = mug->m_sensors;
+//    vector<CollisionResult> results;
+//
+//    // TODO: Parallelize
+//    for (int i = 0 ; i < numPotentialCollisions; i++)
+//    {
+//        int leftIdx = potentialCollisions[i].collidingTriangle1;
+//        int rightIdx = potentialCollisions[i].collidingTriangle2;
+//
+//        // check the left rays on the right triangle
+//        vector<CollisionResult> leftCollisionResults;
+//        for (int l = 0; l < leftSensors[leftIdx].size(); l++)
+//        {
+//            //
+////            Vector3d vidx = rtriangles.row(rightIdx);
+////            Vector3d a =
+////            checkRayTriangleCollision(ray, )
+//        }
+//
+//        // check the right rays on the left triangle
+//        vector<CollisionResult> rightCollisionResults;
+//        for (int r = 0; r < rightSensors[rightIdx].size(); r++)
+//        {
+//
+//        }
+//
+//    }
+//
+
+    return results;
 }
