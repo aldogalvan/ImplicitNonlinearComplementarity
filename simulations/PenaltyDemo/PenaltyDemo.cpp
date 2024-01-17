@@ -294,7 +294,7 @@ void PenaltyDemo::linearizedBDF1Solver(double h, vector<Collision> potentialColl
     MatrixXd J_s = spoon->Ibody; MatrixXd Jinv_s = spoon->IbodyInv;
     Vector3d c = VectorXd::Zero(3); Quaterniond q = Quaterniond::Identity();
     MatrixXd L = q_c*J_s*q_c.inverse()*omega_c; Matrix3d R = q_c.toRotationMatrix();
-    Quaterniond dq = q_d*q_c.inverse()*q.inverse();
+    Quaterniond dq = q_d*q.inverse()*q_c.inverse();
     Vector3d u_c = 2*acos(q.w())*dq.vec();
     Quaterniond q_inv = q.inverse();
     MatrixXd C = Vector4d(dq.x(),dq.y(),dq.z(),dq.w())*RowVector4d(q_inv.x(),q_inv.y(),q_inv.z(),q_inv.w());
